@@ -46,8 +46,9 @@ def upload_paths(
     commit_prefix: str = "GitNest upload",
     remote_subpath: str = "",
     relative_to: str | Path | None = None,
+    progress_callback=None,
 ):
-    """Upload explicitly selected image paths with per-file conflict handling."""
+    """Upload selected image paths and optionally report each completed file."""
     if conflict not in {"skip", "overwrite", "rename"}:
         raise ValueError("未知的上传冲突策略")
     base = repository["base_path"].strip("/")
@@ -58,6 +59,12 @@ def upload_paths(
     root = Path(relative_to).expanduser().resolve() if relative_to else None
     provider = with_provider(repository, token)
     results = []
+
+    def record(path, state, message):
+        results.append((path, state, message))
+        if progress_callback:
+            progress_callback(len(results), len(paths), path, state, message)
+
     try:
         for selected in paths:
             file_path = Path(selected).expanduser().resolve()
@@ -78,7 +85,7 @@ def upload_paths(
                     else:
                         raise
                 if exists and conflict == "skip":
-                    results.append((relative, "skipped", "远程已存在，按策略跳过"))
+                    record(relative, "skipped", "远程已存在，按策略跳过")
                     continue
                 if exists and conflict == "rename":
                     p = Path(relative)
@@ -87,7 +94,7 @@ def upload_paths(
                     remote_path = safe_remote_path(f"{remote_root}/{renamed}" if remote_root else renamed)
                     try:
                         provider.get_file(remote_path)
-                        results.append((relative, "skipped", f"重命名目标已存在：{remote_path}"))
+                        record(relative, "skipped", f"重命名目标已存在：{remote_path}")
                         continue
                     except ProviderError as exc:
                         if exc.status_code != 404:
@@ -97,9 +104,9 @@ def upload_paths(
                     remote_path, content, f"{commit_prefix}: {relative}",
                     sha=remote_sha if exists and conflict == "overwrite" else None,
                 )
-                results.append((relative, "uploaded", f"已提交到 {remote_path}"))
+                record(relative, "uploaded", f"已提交到 {remote_path}")
             except Exception as exc:
-                results.append((str(selected), "failed", str(exc)))
+                record(str(selected), "failed", str(exc))
         return results
     finally:
         provider.close()
@@ -112,12 +119,16 @@ def upload_folder(
     conflict: str = "skip",
     commit_prefix: str = "GitNest upload",
     remote_subpath: str = "",
+    progress_callback=None,
 ):
     root = Path(local_root).expanduser().resolve()
     files = scan_images(root)
     if not files:
         raise ValueError("所选目录中没有找到支持的图片")
-    return upload_paths(repository, token, files, conflict, commit_prefix, remote_subpath, root)
+    return upload_paths(
+        repository, token, files, conflict, commit_prefix, remote_subpath, root,
+        progress_callback=progress_callback,
+    )
 
 def cache_remote_thumbnails(repository: dict, token: str, remote_items: list, cache_root: str):
     """Download remote images once and create local originals + thumbnails."""
