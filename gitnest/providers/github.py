@@ -78,7 +78,7 @@ class GitHubProvider(GitProvider):
         data = self._request(
             "GET",
             f"/repos/{quote(self.owner)}/{quote(self.repo)}/contents{suffix}",
-            params={"ref": self.branch},
+            params={"ref": self.branch} if self.branch else {},
         ).json()
         if isinstance(data, dict):
             data = [data]
@@ -114,8 +114,9 @@ class GitHubProvider(GitProvider):
         payload = {
             "message": message,
             "content": base64.b64encode(content).decode("ascii"),
-            "branch": self.branch,
         }
+        if self.branch:
+            payload["branch"] = self.branch
         if sha:
             payload["sha"] = sha
         return self._request(
