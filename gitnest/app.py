@@ -222,7 +222,7 @@ class GitNestApp:
 
     async def pick_folder(self, e):
         picker = ft.FilePicker()
-        self.page.overlay.append(picker)
+        self.page.services.append(picker)
         self.page.update()
         selected = await picker.get_directory_path()
         if selected:
@@ -280,7 +280,7 @@ class GitNestApp:
                 download_one, repo, self.token_for(repo), item.path, str(cache_root)
             )
             if result:
-                self.page.open(ft.AlertDialog(
+                self.page.show_dialog(ft.AlertDialog(
                     title=ft.Text(item.name),
                     content=ft.Image(src=str(result), width=620, height=480,
                                      fit=ft.ImageFit.CONTAIN),
