@@ -148,3 +148,45 @@ def test_compare_folders_uses_content_sha256_and_reuses_provider(tmp_path, monke
     assert by_path["remote.png"]["status"] == "remote_only"
     assert len(created) == 1
     assert len(provider.calls) == 2
+
+
+def test_github_branch_404_explains_default_and_available_branches():
+    def handler(request: httpx.Request):
+        if request.url.path.endswith("/repos/acme/pics"):
+            return httpx.Response(200, json={"default_branch": "master"})
+        if request.url.path.endswith("/branches/main"):
+            return httpx.Response(404, json={"message": "Branch not found"})
+        if request.url.path.endswith("/branches"):
+            return httpx.Response(200, json=[{"name": "master"}, {"name": "release"}])
+        return httpx.Response(500, json={"message": "unexpected request"})
+
+    provider = GitHubProvider("acme", "pics", "main", "gh-token")
+    provider.client.close()
+    provider.client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        import pytest
+        from gitnest.providers.base import ProviderError
+        with pytest.raises(ProviderError) as error:
+            provider.test_connection()
+        message = str(error.value)
+        assert "分支“main”不存在" in message
+        assert "仓库默认分支：master" in message
+        assert "master、release" in message
+    finally:
+        provider.close()
+
+
+def test_github_empty_branch_uses_repository_default_branch():
+    def handler(request: httpx.Request):
+        if request.url.path.endswith("/repos/acme/pics"):
+            return httpx.Response(200, json={"default_branch": "trunk"})
+        return httpx.Response(500, json={"message": "unexpected request"})
+
+    provider = GitHubProvider("acme", "pics", "", "gh-token")
+    provider.client.close()
+    provider.client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        provider.test_connection()
+        assert provider.branch == "trunk"
+    finally:
+        provider.close()
