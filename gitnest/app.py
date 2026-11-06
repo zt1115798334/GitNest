@@ -3,7 +3,7 @@ from pathlib import Path
 import flet as ft
 from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs
 from gitnest.security import save_token, get_token, delete_token
-from gitnest.services import test_repository, remote_images, download_one, download_all, upload_folder, upload_paths, compare_folders, cache_remote_thumbnails
+from gitnest.services import test_repository, remote_images, download_one, download_all, upload_paths, compare_folders, cache_remote_thumbnails
 from gitnest.image_cache import save_remote_image
 from gitnest.images import scan_images
 from gitnest.config import CACHE_DIR
@@ -94,8 +94,9 @@ class GitNestApp:
             content=ft.Column(spacing=10,controls=[
                 ft.Row([ft.Column([
                     ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
-                    ft.Text("浏览仓库中的图片，支持预览和单张下载。",size=12,color=ft.Colors.GREY_600)
-                ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote)]),
+                    ft.Text("浏览仓库中的图片，支持预览、单张下载和批量下载。",size=12,color=ft.Colors.GREY_600)
+                ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote),
+                    ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)]),
                 self.gallery
             ])
         )
