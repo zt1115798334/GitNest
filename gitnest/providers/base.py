@@ -44,7 +44,15 @@ class GitProvider(ABC):
             if current in visited:
                 continue
             visited.add(current)
-            for item in self.list_path(current):
+            try:
+                children = self.list_path(current)
+            except ProviderError as exc:
+                # The configured image root may not exist yet in a new repository.
+                # Repository and branch access are validated separately by test_connection().
+                if exc.status_code == 404 and current == root:
+                    continue
+                raise
+            for item in children:
                 if item.type == "dir":
                     pending.append(item.path)
                 elif is_image_path(item.path):
