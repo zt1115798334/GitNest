@@ -36,7 +36,7 @@ class GitNestApp:
         self.platform=ft.Dropdown(label="平台",value="github",options=[ft.DropdownOption("github","GitHub"),ft.DropdownOption("gitee","Gitee")],width=160)
         self.owner=ft.TextField(label="Owner / 用户名",width=220)
         self.repo=ft.TextField(label="仓库名称",width=220)
-        self.branch=ft.TextField(label="分支（如 main / master）",value="main",hint_text="填写仓库实际存在的分支",width=200)
+        self.branch=ft.TextField(label="分支（留空自动使用默认分支）",value="",hint_text="例如 main、master；留空自动检测",width=240)
         self.base_path=ft.TextField(label="图片根目录",value="images",width=220)
         self.repo_name=ft.TextField(label="显示名称",width=220)
         self.token=ft.TextField(label="访问令牌（不会保存到普通配置文件）",password=True,can_reveal_password=True,expand=True)
@@ -106,7 +106,7 @@ class GitNestApp:
     def form_data(self):
         owner=(self.owner.value or "").strip(); repo=(self.repo.value or "").strip()
         if not owner or not repo: raise ValueError("Owner 和仓库名称不能为空")
-        branch=(self.branch.value or "main").strip(); base=(self.base_path.value or "images").strip("/")
+        branch=(self.branch.value or "").strip(); base=(self.base_path.value or "images").strip("/")
         if any(x in (".","..") for x in base.split("/")): raise ValueError("图片目录包含非法路径")
         return {"name":(self.repo_name.value or f"{owner}/{repo}").strip(),"platform":self.platform.value,
                 "owner":owner,"repo":repo,"branch":branch,"base_path":base}
