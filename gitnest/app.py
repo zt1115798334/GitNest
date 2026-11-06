@@ -295,10 +295,13 @@ class GitNestApp:
             self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
             self.page.update()
             root=self.local_folder.value if self.local_mode=="folder" and self.local_folder.value else None
+            loop=asyncio.get_running_loop()
+            def progress_callback(index,total,path,state,message):
+                loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state)
             results=await self.run_background(
                 upload_paths,repo,self.token_for(repo),self.local_files,
                 self.conflict.value,self.commit_message.value or "GitNest image upload",
-                self.remote_subpath.value or "",root
+                self.remote_subpath.value or "",root,progress_callback=progress_callback
             )
             if results is None:return
             counts={"uploaded":0,"skipped":0,"failed":0}
@@ -338,9 +341,15 @@ class GitNestApp:
             self.status.value=f"选择目录失败：{ex}"
             self.page.update()
 
-    async def run_background(self,fn,*args):
+    def update_upload_progress(self,index,total,path,state):
+        self.upload_progress.value=index/total if total else 1
+        labels={"uploaded":"已上传","skipped":"已跳过","failed":"失败"}
+        self.status.value=f"上传进度 {index}/{total} · {labels.get(state,state)}：{path}"
+        self.page.update()
+
+    async def run_background(self,fn,*args,**kwargs):
         self.status.value="正在处理，请稍候……";self.page.update()
-        try:return await asyncio.to_thread(fn,*args)
+        try:return await asyncio.to_thread(fn,*args,**kwargs)
         except Exception as ex:self.status.value=f"操作失败：{ex}";self.page.update();return None
 
     async def load_remote(self,e):
@@ -404,20 +413,11 @@ class GitNestApp:
         self.page.update()
 
     async def upload_local(self,e):
-        try:
-            if not self.local_folder.value:raise ValueError("请先选择本地图片目录")
-            repo=self.current_repo()
-            if self.conflict.value=="overwrite" and not self.confirm_overwrite.value:
-                raise ValueError("覆盖模式会替换远程同路径文件，请先勾选覆盖确认")
-            results=await self.run_background(upload_folder,repo,self.token_for(repo),self.local_folder.value,self.conflict.value,self.commit_message.value or "GitNest upload",self.remote_subpath.value or "")
-            self.confirm_overwrite.value=False
-            if results is None:return
-            counts={"uploaded":0,"skipped":0,"failed":0}
-            for path,state,msg in results:
-                counts[state]=counts.get(state,0)+1;add_log(repo["id"],"upload",path,state,msg)
-            self.status.value=f"上传结束：成功 {counts['uploaded']}，跳过 {counts['skipped']}，失败 {counts['failed']}"
-        except Exception as ex:self.status.value=f"上传失败：{ex}"
-        self.page.update()
+        if self.local_mode!="folder" or not self.local_folder.value:
+            self.status.value="请先选择本地图片目录"
+            self.page.update()
+            return
+        await self.upload_selected(e)
 
     async def sync_preview(self,e):
         try:
