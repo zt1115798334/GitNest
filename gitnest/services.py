@@ -63,7 +63,11 @@ def upload_paths(
     def record(path, state, message):
         results.append((path, state, message))
         if progress_callback:
-            progress_callback(len(results), len(paths), path, state, message)
+            try:
+                progress_callback(len(results), len(paths), path, state, message)
+            except Exception:
+                # A UI progress observer must never interrupt a repository write.
+                pass
 
     try:
         for selected in paths:
