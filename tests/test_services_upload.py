@@ -33,14 +33,17 @@ def test_upload_paths_uses_remote_subfolder_and_preserves_relative_paths(tmp_pat
     image = nested / "trip.png"
     image.write_bytes(b"png-bytes")
     provider = FakeProvider()
+    progress = []
     monkeypatch.setattr(services, "with_provider", lambda *_: provider)
 
     result = services.upload_paths(
         {"base_path": "images"}, "token", [image],
         remote_subpath="summer", relative_to=root,
+        progress_callback=lambda *args: progress.append(args),
     )
 
     assert result[0][1] == "uploaded"
+    assert progress == [(1, 1, "2026/trip.png", "uploaded", "已提交到 images/summer/2026/trip.png")]
     assert provider.writes[0][0] == "images/summer/2026/trip.png"
     assert provider.writes[0][1] == b"png-bytes"
     assert provider.closed
