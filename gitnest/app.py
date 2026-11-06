@@ -20,6 +20,7 @@ class GitNestApp:
         self.remote_items=[]
         self.local_files=[]
         self.local_mode='files'
+        self.local_root=None
         self.file_picker=ft.FilePicker()
         self.page.services.append(self.file_picker)
         self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260)
@@ -71,7 +72,7 @@ class GitNestApp:
         self.preview_text=ft.Text(selectable=True)
         self.status=ft.Text("选择仓库和本地图片，即可开始管理",color=ft.Colors.GREY_600)
         self.upload_button=ft.Button("上传所选图片",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_selected,disabled=True)
-        self.folder_upload_button=ft.OutlinedButton("上传整个目录",icon=ft.Icons.FOLDER_ZIP,on_click=self.upload_local,disabled=True)
+        self.folder_upload_button=ft.OutlinedButton("上传整个目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.upload_local,disabled=True)
         self.local_section=ft.Container(
             padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
             content=ft.Column(spacing=12,controls=[
@@ -213,6 +214,7 @@ class GitNestApp:
             if not paths:
                 raise ValueError("文件选择器没有返回本地文件路径")
             self.local_mode="files"
+            self.local_root=None
             self.local_folder.value=""
             await self.set_local_files(paths)
         except Exception as ex:
@@ -269,6 +271,7 @@ class GitNestApp:
     def clear_local_selection(self,e=None):
         self.local_files=[]
         self.local_mode="files"
+        self.local_root=None
         self.local_folder.value=""
         self.local_gallery.controls.clear()
         self.local_summary.value="尚未选择图片"
@@ -294,7 +297,7 @@ class GitNestApp:
             self.upload_progress.value=None
             self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
             self.page.update()
-            root=self.local_folder.value if self.local_mode=="folder" and self.local_folder.value else None
+            root=self.local_root if self.local_mode=="folder" else None
             loop=asyncio.get_running_loop()
             def progress_callback(index,total,path,state,message):
                 loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state)
@@ -327,6 +330,7 @@ class GitNestApp:
             selected=await self.file_picker.get_directory_path(dialog_title="选择包含图片的目录")
             if not selected:return
             self.local_folder.value=selected
+            self.local_root=Path(selected).expanduser().resolve()
             self.local_mode="folder"
             files=await self.run_background(scan_images,selected)
             if files is None:return
@@ -413,7 +417,7 @@ class GitNestApp:
         self.page.update()
 
     async def upload_local(self,e):
-        if self.local_mode!="folder" or not self.local_folder.value:
+        if self.local_mode!="folder" or not self.local_root:
             self.status.value="请先选择本地图片目录"
             self.page.update()
             return
