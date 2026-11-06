@@ -1,0 +1,10 @@
+[project]
+name = "gitnest"
+version = "0.1.0"
+description = "Desktop GitHub and Gitee image repository manager"
+requires-python = ">=3.14"
+dependencies = ["flet==0.86.5", "httpx>=0.28,<1", "Pillow>=11,<13", "keyring>=25,<27", "platformdirs>=4,<5"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
