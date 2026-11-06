@@ -36,7 +36,7 @@ class GitNestApp:
         self.platform=ft.Dropdown(label="平台",value="github",options=[ft.DropdownOption("github","GitHub"),ft.DropdownOption("gitee","Gitee")],width=160)
         self.owner=ft.TextField(label="Owner / 用户名",width=220)
         self.repo=ft.TextField(label="仓库名称",width=220)
-        self.branch=ft.TextField(label="分支",value="main",width=160)
+        self.branch=ft.TextField(label="分支（如 main / master）",value="main",hint_text="填写仓库实际存在的分支",width=200)
         self.base_path=ft.TextField(label="图片根目录",value="images",width=220)
         self.repo_name=ft.TextField(label="显示名称",width=220)
         self.token=ft.TextField(label="访问令牌（不会保存到普通配置文件）",password=True,can_reveal_password=True,expand=True)
