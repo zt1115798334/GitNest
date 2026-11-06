@@ -26,11 +26,23 @@ If PowerShell blocks activation, run \`.venv\Scripts\activate.bat\` from CMD ins
 - PAT / Gitee private-token authentication. Tokens are stored in the OS credential vault through \`keyring\`; they are never written to SQLite or logs.
 - Recursive remote image listing, local image folder scanning, image previews and direct download.
 - Remote thumbnail gallery: originals and JPEG thumbnails are cached locally; cache keys use the full repository path to avoid collisions between same-named files.
-- Batch uploads with create/update detection, per-file results and commit messages.
+- A redesigned image workspace with multi-select local image picking, recursive folder scanning, local thumbnail previews, per-file removal, and clear upload settings.
+- Batch uploads with create/update detection, per-file progress, success/skip/failure summaries, custom remote subfolders, and commit messages.
 - Batch downloads that preserve paths relative to the configured remote image directory.
 - Two-way comparison by actual file-content SHA-256. Same-path files report both hashes and byte sizes; local-only, remote-only, identical, different and read-error states are distinguished.
 - SQLite operation history and safe error reporting.
 - Overwrite mode requires an explicit confirmation checkbox before upload starts.
+- Upload subfolders are validated as safe repository-relative paths; selected files cannot escape the configured image root.
+
+## Upload images
+
+1. Open **Image Workspace** and select a configured GitHub or Gitee repository.
+2. Choose **Select images** to add individual images, or **Select folder** to recursively scan a directory. Folder uploads preserve subdirectory structure.
+3. Review the local thumbnail queue. Remove individual files or clear the selection before uploading.
+4. Optionally enter a remote subfolder (relative to the configured image root), choose the conflict policy, and set the commit message.
+5. Choose **Upload selected images**. The workspace reports per-file progress and a final uploaded / skipped / failed summary. Overwrite still requires the explicit confirmation checkbox.
+
+For individual file selection, files are uploaded by filename. If selected files have duplicate names, GitNest asks you to select them in separate batches or choose their parent folder so relative paths can be preserved.
 
 ## Configure a repository
 
