@@ -3,7 +3,9 @@ from pathlib import Path
 import flet as ft
 from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs
 from gitnest.security import save_token, get_token, delete_token
-from gitnest.services import test_repository, remote_images, download_one, download_all, upload_folder, compare_folders, cache_remote_thumbnails
+from gitnest.services import test_repository, remote_images, download_one, download_all, upload_folder, upload_paths, compare_folders, cache_remote_thumbnails
+from gitnest.image_cache import save_remote_image
+from gitnest.images import scan_images
 from gitnest.config import CACHE_DIR
 
 class GitNestApp:
@@ -16,10 +18,18 @@ class GitNestApp:
         self.page.theme_mode=ft.ThemeMode.SYSTEM
         self.selected_repo_id=None
         self.remote_items=[]
+        self.local_files=[]
+        self.local_mode='files'
+        self.file_picker=ft.FilePicker()
+        self.page.services.append(self.file_picker)
+        self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260)
+        self.upload_progress=ft.ProgressBar(value=0, width=320, visible=False)
+        self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
+        self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10)
         self.local_folder=ft.TextField(label="本地图片目录", expand=True)
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
-        self.gallery=ft.GridView(expand=True, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12)
+        self.gallery=ft.GridView(expand=False, height=360, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12)
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
         self.history=self.build_history()
@@ -53,23 +63,68 @@ class GitNestApp:
             self.repo_message,ft.Divider(),ft.Text("已配置仓库",size=18,weight=ft.FontWeight.BOLD),self.repo_cards])
 
     def build_workspace(self):
-        self.conflict=ft.Dropdown(label="上传冲突策略",value="skip",width=220,options=[
-            ft.DropdownOption("skip","远程存在则跳过"),ft.DropdownOption("overwrite","覆盖远程文件"),
+        self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,options=[
+            ft.DropdownOption("skip","跳过已存在文件"),ft.DropdownOption("overwrite","覆盖远程文件"),
             ft.DropdownOption("rename","自动重命名")])
-        self.commit_message=ft.TextField(label="Commit 信息",value="GitNest upload",expand=True)
+        self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",expand=True)
         self.confirm_overwrite=ft.Checkbox(label="我确认覆盖远程同路径图片",value=False)
         self.preview_text=ft.Text(selectable=True)
-        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,controls=[
-            ft.Text("图片工作台",size=26,weight=ft.FontWeight.BOLD),
-            ft.Row([self.repo_dropdown,ft.OutlinedButton("刷新仓库",icon=ft.Icons.REFRESH,on_click=self.refresh_repositories)]),
-            ft.Row([self.local_folder,ft.OutlinedButton("选择目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_folder)],wrap=True),
-            ft.Row([ft.Button("读取远程图片",icon=ft.Icons.CLOUD_DOWNLOAD,on_click=self.load_remote),
-                    ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all),
-                    ft.Button("批量上传",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_local)],wrap=True),
-            ft.Row([self.conflict,self.commit_message],wrap=True),self.confirm_overwrite,self.status,
-            ft.Text("远程图片图库",size=18,weight=ft.FontWeight.BOLD),self.gallery,
-            ft.Divider(),ft.Text("同步差异预览",size=18,weight=ft.FontWeight.BOLD),
-            ft.OutlinedButton("比较本地与远程内容（SHA-256）",icon=ft.Icons.COMPARE_ARROWS,on_click=self.sync_preview),self.preview_text])
+        self.status=ft.Text("选择仓库和本地图片，即可开始管理",color=ft.Colors.GREY_600)
+        self.upload_button=ft.Button("上传所选图片",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_selected,disabled=True)
+        self.folder_upload_button=ft.OutlinedButton("上传整个目录",icon=ft.Icons.FOLDER_ZIP,on_click=self.upload_local,disabled=True)
+        self.local_section=ft.Container(
+            padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+            content=ft.Column(spacing=12,controls=[
+                ft.Row([ft.Column([
+                    ft.Text("本地图片",size=18,weight=ft.FontWeight.BOLD),
+                    ft.Text("支持多选图片或扫描整个目录；上传前可预览和移除文件。",size=12,color=ft.Colors.GREY_600)
+                ],expand=True),self.local_summary]),
+                ft.Row([
+                    ft.Button("选择图片",icon=ft.Icons.ADD_PHOTO_ALTERNATE,on_click=self.pick_files),
+                    ft.OutlinedButton("选择目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_folder),
+                    ft.TextButton("清空选择",icon=ft.Icons.CLEAR,on_click=self.clear_local_selection)
+                ],wrap=True),
+                self.local_folder,
+                self.local_gallery,
+            ])
+        )
+        self.remote_section=ft.Container(
+            padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+            content=ft.Column(spacing=10,controls=[
+                ft.Row([ft.Column([
+                    ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
+                    ft.Text("浏览仓库中的图片，支持预览和单张下载。",size=12,color=ft.Colors.GREY_600)
+                ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote)]),
+                self.gallery
+            ])
+        )
+        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=16,controls=[
+            ft.Row([
+                ft.Column([
+                    ft.Text("图片工作台",size=28,weight=ft.FontWeight.BOLD),
+                    ft.Text("本地图片与 GitHub / Gitee 仓库之间的上传、下载和同步。",color=ft.Colors.GREY_600)
+                ],expand=True),
+                self.repo_dropdown,
+                ft.IconButton(ft.Icons.REFRESH,tooltip="刷新仓库列表",on_click=self.refresh_repositories)
+            ],vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            self.local_section,
+            ft.Container(padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                content=ft.Column(spacing=12,controls=[
+                    ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD),
+                    ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True),
+                    self.confirm_overwrite,
+                    ft.Row([self.upload_button,self.folder_upload_button,self.upload_progress],wrap=True),
+                    self.status
+                ])),
+            self.remote_section,
+            ft.Container(padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                content=ft.Column(spacing=10,controls=[
+                    ft.Text("同步差异",size=18,weight=ft.FontWeight.BOLD),
+                    ft.Text("按文件内容 SHA-256 比较本地和远程图片，不会自动删除任何文件。",size=12,color=ft.Colors.GREY_600),
+                    ft.OutlinedButton("比较本地与远程内容",icon=ft.Icons.COMPARE_ARROWS,on_click=self.sync_preview),
+                    self.preview_text
+                ]))
+        ])
 
     def build_history(self):
         self.history_rows=ft.Column(spacing=4)
@@ -144,11 +199,144 @@ class GitNestApp:
     def remove_repo(self,row):
         delete_repository(row["id"]);delete_token(row);self.refresh_repositories()
 
+    async def pick_files(self,e=None):
+        try:
+            files=await self.file_picker.pick_files(
+                dialog_title="选择要上传的图片",
+                allow_multiple=True,
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["jpg","jpeg","png","gif","webp","bmp","tif","tiff","avif"],
+            )
+            if not files:
+                return
+            paths=[Path(item.path) for item in files if item.path]
+            if not paths:
+                raise ValueError("文件选择器没有返回本地文件路径")
+            self.local_mode="files"
+            self.local_folder.value=""
+            await self.set_local_files(paths)
+        except Exception as ex:
+            self.status.value=f"选择图片失败：{ex}"
+            self.page.update()
+
+    async def set_local_files(self,paths):
+        unique=[]
+        seen=set()
+        for value in paths:
+            path=Path(value).expanduser().resolve()
+            if path.is_file() and path not in seen:
+                unique.append(path);seen.add(path)
+        self.local_files=unique
+        self.local_gallery.controls=[]
+        self.upload_button.disabled=not unique
+        self.folder_upload_button.disabled=not (self.local_mode=="folder" and unique)
+        self.local_summary.value=f"已选择 {len(unique)} 张图片"
+        self.page.update()
+        for path in unique:
+            try:
+                content=await self.run_background(lambda p: p.read_bytes(),path)
+                if content is None: continue
+                cached=await self.run_background(save_remote_image,content,f"local/{path}",str(CACHE_DIR/"local"))
+                if not cached: continue
+                _,thumbnail=cached
+                card=ft.Container(
+                    padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
+                    content=ft.Column(spacing=6,controls=[
+                        ft.Container(height=112,alignment=ft.Alignment.CENTER,
+                            content=ft.Image(src=str(thumbnail),width=160,height=108,fit=ft.ImageFit.CONTAIN)),
+                        ft.Text(path.name,size=12,weight=ft.FontWeight.BOLD,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
+                        ft.Text(f"{path.stat().st_size:,} bytes",size=10,color=ft.Colors.GREY_600),
+                        ft.Row([ft.IconButton(ft.Icons.CLOSE,tooltip="从上传列表移除",
+                            on_click=lambda e,p=path:self.remove_local_file(p))],alignment=ft.MainAxisAlignment.END)
+                    ])
+                )
+                self.local_gallery.controls.append(card)
+                self.page.update()
+            except Exception:
+                continue
+        self.status.value=f"本地图片已就绪：{len(self.local_files)} 张"
+        self.page.update()
+
+    def remove_local_file(self,path):
+        self.local_files=[item for item in self.local_files if item!=path]
+        self.local_summary.value=f"已选择 {len(self.local_files)} 张图片"
+        self.local_gallery.controls=[]
+        self.page.update()
+        async def redraw():
+            await self.set_local_files(self.local_files)
+        self.page.run_task(redraw)
+
+    def clear_local_selection(self,e=None):
+        self.local_files=[]
+        self.local_mode="files"
+        self.local_folder.value=""
+        self.local_gallery.controls.clear()
+        self.local_summary.value="尚未选择图片"
+        self.upload_button.disabled=True
+        self.folder_upload_button.disabled=True
+        self.status.value="已清空本地图片选择"
+        self.page.update()
+
+    async def upload_selected(self,e=None):
+        try:
+            if not self.local_files:
+                raise ValueError("请先选择图片或目录")
+            repo=self.current_repo()
+            if self.conflict.value=="overwrite" and not self.confirm_overwrite.value:
+                raise ValueError("覆盖模式会替换远程同路径文件，请先勾选覆盖确认")
+            if self.local_mode=="files":
+                names=[p.name.casefold() for p in self.local_files]
+                if len(names)!=len(set(names)):
+                    raise ValueError("所选文件中存在同名图片。请分批选择，或改为选择目录以保留子目录结构")
+            self.upload_button.disabled=True
+            self.folder_upload_button.disabled=True
+            self.upload_progress.visible=True
+            self.upload_progress.value=None
+            self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
+            self.page.update()
+            root=self.local_folder.value if self.local_mode=="folder" and self.local_folder.value else None
+            results=await self.run_background(
+                upload_paths,repo,self.token_for(repo),self.local_files,
+                self.conflict.value,self.commit_message.value or "GitNest image upload",
+                self.remote_subpath.value or "",root
+            )
+            if results is None:return
+            counts={"uploaded":0,"skipped":0,"failed":0}
+            for path,state,msg in results:
+                counts[state]=counts.get(state,0)+1
+                add_log(repo["id"],"upload",path,state,msg)
+            self.confirm_overwrite.value=False
+            self.status.value=f"上传完成：成功 {counts['uploaded']} · 跳过 {counts['skipped']} · 失败 {counts['failed']}"
+            self.upload_progress.value=1
+            if counts["uploaded"]:
+                self.remote_items=[]
+                self.gallery.controls.clear()
+        except Exception as ex:
+            self.status.value=f"上传失败：{ex}"
+        finally:
+            self.upload_progress.visible=False
+            self.upload_button.disabled=not self.local_files
+            self.folder_upload_button.disabled=not (self.local_mode=="folder" and bool(self.local_files))
+            self.page.update()
+
     async def pick_folder(self,e):
-        picker=ft.FilePicker()
-        self.page.services.append(picker);self.page.update()
-        selected=await picker.get_directory_path()
-        if selected:self.local_folder.value=selected;self.page.update()
+        try:
+            selected=await self.file_picker.get_directory_path(dialog_title="选择包含图片的目录")
+            if not selected:return
+            self.local_folder.value=selected
+            self.local_mode="folder"
+            files=await self.run_background(scan_images,selected)
+            if files is None:return
+            if not files:
+                self.clear_local_selection()
+                raise ValueError("该目录及其子目录中没有找到支持的图片")
+            await self.set_local_files(files)
+            self.folder_upload_button.disabled=False
+            self.status.value=f"已扫描目录：找到 {len(files)} 张图片（保留目录结构）"
+            self.page.update()
+        except Exception as ex:
+            self.status.value=f"选择目录失败：{ex}"
+            self.page.update()
 
     async def run_background(self,fn,*args):
         self.status.value="正在处理，请稍候……";self.page.update()
@@ -221,7 +409,7 @@ class GitNestApp:
             repo=self.current_repo()
             if self.conflict.value=="overwrite" and not self.confirm_overwrite.value:
                 raise ValueError("覆盖模式会替换远程同路径文件，请先勾选覆盖确认")
-            results=await self.run_background(upload_folder,repo,self.token_for(repo),self.local_folder.value,self.conflict.value,self.commit_message.value or "GitNest upload")
+            results=await self.run_background(upload_folder,repo,self.token_for(repo),self.local_folder.value,self.conflict.value,self.commit_message.value or "GitNest upload",self.remote_subpath.value or "")
             self.confirm_overwrite.value=False
             if results is None:return
             counts={"uploaded":0,"skipped":0,"failed":0}
