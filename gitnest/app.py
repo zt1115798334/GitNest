@@ -83,7 +83,10 @@ class GitNestApp:
                 ft.Row([
                     ft.Button("选择图片",icon=ft.Icons.ADD_PHOTO_ALTERNATE,on_click=self.pick_files),
                     ft.OutlinedButton("选择目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_folder),
-                    ft.TextButton("清空选择",icon=ft.Icons.CLEAR,on_click=self.clear_local_selection)
+                    ft.TextButton("清空选择",icon=ft.Icons.CLEAR,on_click=self.clear_local_selection),
+                    self.upload_button,
+                    self.folder_upload_button,
+                    self.upload_progress
                 ],wrap=True),
                 self.local_folder,
                 self.local_gallery,
@@ -115,7 +118,7 @@ class GitNestApp:
                     ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD),
                     ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True),
                     self.confirm_overwrite,
-                    ft.Row([self.upload_button,self.folder_upload_button,self.upload_progress],wrap=True),
+                    ft.Text("选择完成后，请在上方本地图片区域点击上传按钮。",size=12,color=ft.Colors.GREY_600),
                     self.status
                 ])),
             self.remote_section,
