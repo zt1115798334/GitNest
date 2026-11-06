@@ -38,42 +38,86 @@ def download_all(repository: dict, token: str, target_root: str, remote_items: l
         except Exception as exc: results.append((item.path, False, str(exc)))
     return results
 
-def upload_folder(repository: dict, token: str, local_root: str, conflict: str = "skip", commit_prefix: str = "GitNest upload"):
-    root=Path(local_root).expanduser().resolve()
-    files=scan_images(root)
-    provider=with_provider(repository, token)
-    results=[]
-    base=repository["base_path"].strip("/")
+def upload_paths(
+    repository: dict,
+    token: str,
+    paths: list[str | Path],
+    conflict: str = "skip",
+    commit_prefix: str = "GitNest upload",
+    remote_subpath: str = "",
+    relative_to: str | Path | None = None,
+):
+    """Upload explicitly selected image paths with per-file conflict handling."""
+    if conflict not in {"skip", "overwrite", "rename"}:
+        raise ValueError("未知的上传冲突策略")
+    base = repository["base_path"].strip("/")
+    subpath = remote_subpath.strip().replace("\\", "/").strip("/")
+    if subpath:
+        subpath = safe_remote_path(subpath)
+    remote_root = "/".join(part for part in (base, subpath) if part)
+    root = Path(relative_to).expanduser().resolve() if relative_to else None
+    provider = with_provider(repository, token)
+    results = []
     try:
-        for file_path in files:
-            relative=file_path.relative_to(root).as_posix()
-            remote_path=safe_remote_path(f"{base}/{relative}" if base else relative)
+        for selected in paths:
+            file_path = Path(selected).expanduser().resolve()
             try:
-                content=file_path.read_bytes(); validate_image(content, relative)
-                remote_sha=None
+                if not file_path.is_file():
+                    raise ValueError("文件不存在或不是普通文件")
+                relative = file_path.relative_to(root).as_posix() if root else file_path.name
+                content = file_path.read_bytes()
+                validate_image(content, relative)
+                remote_path = safe_remote_path(f"{remote_root}/{relative}" if remote_root else relative)
+                remote_sha = None
                 try:
-                    _, remote_sha=provider.get_file(remote_path)
-                    exists=True
+                    _, remote_sha = provider.get_file(remote_path)
+                    exists = True
                 except ProviderError as exc:
-                    if exc.status_code == 404: exists=False
-                    else: raise
+                    if exc.status_code == 404:
+                        exists = False
+                    else:
+                        raise
                 if exists and conflict == "skip":
-                    results.append((relative, "skipped", "远程已存在，按策略跳过")); continue
+                    results.append((relative, "skipped", "远程已存在，按策略跳过"))
+                    continue
                 if exists and conflict == "rename":
-                    p=Path(relative); candidate=f"{p.stem}_{sha256_bytes(content)[:8]}{p.suffix}"
-                    remote_path=safe_remote_path(f"{base}/{p.parent.as_posix()}/{candidate}" if str(p.parent)!="." and base else (f"{base}/{candidate}" if base else candidate))
+                    p = Path(relative)
+                    candidate = f"{p.stem}_{sha256_bytes(content)[:8]}{p.suffix}"
+                    renamed = (p.parent / candidate).as_posix()
+                    remote_path = safe_remote_path(f"{remote_root}/{renamed}" if remote_root else renamed)
                     try:
-                        _, existing_sha=provider.get_file(remote_path)
-                        results.append((relative,"skipped",f"重命名目标已存在：{remote_path}")); continue
+                        provider.get_file(remote_path)
+                        results.append((relative, "skipped", f"重命名目标已存在：{remote_path}"))
+                        continue
                     except ProviderError as exc:
-                        if exc.status_code != 404: raise
-                    remote_sha=None
-                if exists and conflict == "overwrite": pass
-                provider.put_file(remote_path, content, f"{commit_prefix}: {relative}", sha=remote_sha)
+                        if exc.status_code != 404:
+                            raise
+                    remote_sha = None
+                provider.put_file(
+                    remote_path, content, f"{commit_prefix}: {relative}",
+                    sha=remote_sha if exists and conflict == "overwrite" else None,
+                )
                 results.append((relative, "uploaded", f"已提交到 {remote_path}"))
-            except Exception as exc: results.append((relative, "failed", str(exc)))
+            except Exception as exc:
+                results.append((str(selected), "failed", str(exc)))
         return results
-    finally: provider.close()
+    finally:
+        provider.close()
+
+
+def upload_folder(
+    repository: dict,
+    token: str,
+    local_root: str,
+    conflict: str = "skip",
+    commit_prefix: str = "GitNest upload",
+    remote_subpath: str = "",
+):
+    root = Path(local_root).expanduser().resolve()
+    files = scan_images(root)
+    if not files:
+        raise ValueError("所选目录中没有找到支持的图片")
+    return upload_paths(repository, token, files, conflict, commit_prefix, remote_subpath, root)
 
 def cache_remote_thumbnails(repository: dict, token: str, remote_items: list, cache_root: str):
     """Download remote images once and create local originals + thumbnails."""
