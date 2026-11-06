@@ -235,12 +235,17 @@ class GitNestApp:
         self.folder_upload_button.disabled=not (self.local_mode=="folder" and unique)
         self.local_summary.value=f"已选择 {len(unique)} 张图片"
         self.page.update()
+        preview_errors=[]
         for path in unique:
             try:
                 content=await self.run_background(lambda p: p.read_bytes(),path)
-                if content is None: continue
-                cached=await self.run_background(save_remote_image,content,f"local/{path}",str(CACHE_DIR/"local"))
-                if not cached: continue
+                if content is None:
+                    raise ValueError("读取文件失败，请检查文件是否仍存在或被其他程序占用")
+                cached=await self.run_background(
+                    save_remote_image,content,f"local/{path}",str(CACHE_DIR/"local")
+                )
+                if not cached:
+                    raise ValueError("缩略图生成失败，请检查图片格式或文件是否损坏")
                 _,thumbnail=cached
                 card=ft.Container(
                     padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
@@ -253,11 +258,24 @@ class GitNestApp:
                             on_click=lambda e,p=path:self.remove_local_file(p))],alignment=ft.MainAxisAlignment.END)
                     ])
                 )
-                self.local_gallery.controls.append(card)
-                self.page.update()
-            except Exception:
-                continue
-        self.status.value=f"本地图片已就绪：{len(self.local_files)} 张"
+            except Exception as exc:
+                preview_errors.append(f"{path.name}: {exc}")
+                card=ft.Container(
+                    padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
+                    content=ft.Column(spacing=6,controls=[
+                        ft.Container(height=112,alignment=ft.Alignment.CENTER,
+                            content=ft.Icon(ft.Icons.BROKEN_IMAGE,color=ft.Colors.RED,size=36)),
+                        ft.Text(path.name,size=12,weight=ft.FontWeight.BOLD,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
+                        ft.Text(f"预览失败：{exc}",size=10,color=ft.Colors.RED,max_lines=3),
+                        ft.IconButton(ft.Icons.CLOSE,tooltip="从上传列表移除",
+                            on_click=lambda e,p=path:self.remove_local_file(p))
+                    ])
+                )
+            self.local_gallery.controls.append(card)
+            self.page.update()
+        self.status.value=f"本地图片已加入队列：{len(self.local_files)} 张"
+        if preview_errors:
+            self.status.value+=f"；其中 {len(preview_errors)} 张预览失败，但仍可尝试上传"
         self.page.update()
 
     def remove_local_file(self,path):
