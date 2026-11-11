@@ -69,8 +69,8 @@ class GitNestApp:
                 ft.NavigationRailDestination(icon=ft.Icons.SETTINGS_OUTLINED,selected_icon=ft.Icons.SETTINGS,label="仓库配置"),
                 ft.NavigationRailDestination(icon=ft.Icons.HISTORY_OUTLINED,selected_icon=ft.Icons.HISTORY,label="操作记录")],
             on_change=self.navigate)
-        sidebar=ft.Container(width=184,bgcolor="#FFFFFF",padding=ft.Padding(12,22,12,16),
-            content=ft.Column(spacing=18,controls=[
+        sidebar=ft.Container(width=184,expand=True,bgcolor="#FFFFFF",padding=ft.Padding(12,22,12,16),
+            content=ft.Column(expand=True,spacing=18,controls=[
                 ft.Container(padding=ft.Padding(12,8,8,18),content=ft.Row(spacing=10,controls=[
                     ft.Container(width=34,height=34,border_radius=11,bgcolor="#EAF0FF",
                         alignment=ft.Alignment.CENTER,content=ft.Icon(ft.Icons.PHOTO_LIBRARY_ROUNDED,color="#315DDB",size=20)),
@@ -80,7 +80,7 @@ class GitNestApp:
                     ])
                 ])),
                 ft.Text("工作空间",size=10,weight=ft.FontWeight.BOLD,color="#9AA3B2"),
-                self.navigation,
+                ft.Container(expand=True,content=self.navigation),
                 ft.Container(expand=True),
                 ft.Divider(color="#EDF0F5"),
                 ft.Container(padding=10,content=ft.Column(spacing=3,controls=[
@@ -88,7 +88,11 @@ class GitNestApp:
                     ft.Text("图片仓库管理工具",size=10,color="#9AA3B2")
                 ]))
             ]))
-        self.page.add(ft.Row([sidebar,ft.VerticalDivider(width=1,color="#E9EDF3"),self.body],spacing=0,expand=True))
+        self.page.add(ft.SafeArea(expand=True,content=ft.Row([
+            sidebar,
+            ft.VerticalDivider(width=1,color="#E9EDF3"),
+            self.body
+        ],spacing=0,expand=True)))
         self.refresh_repositories()
         self.refresh_saved_tasks()
 
