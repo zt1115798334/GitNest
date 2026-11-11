@@ -405,8 +405,8 @@ class GitNestApp:
         loop=asyncio.get_running_loop()
         control=self.active_upload_control
         def progress_callback(index,total,path,state,message):
-            if state in {"uploaded","skipped","failed"}:
-                completed[str(Path(path).resolve())]={"state":state,"message":message}
+            if state in {"uploaded","skipped","failed"} and 0 < index <= len(remaining):
+                completed[str(remaining[index-1].resolve())]={"state":state,"message":message}
                 update_upload_task(task_id,payload=payload,summary=f"已处理 {len(completed)} 项")
             loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state,message)
         try:
@@ -419,9 +419,9 @@ class GitNestApp:
             if results is None:
                 update_upload_task(task_id,payload=payload,status="failed",summary="上传执行异常，请检查日志")
                 return
-            for path,state,msg in results:
-                key=str(Path(path).resolve()) if Path(path).is_absolute() else str(Path(path).resolve())
-                completed[key]={"state":state,"message":msg}
+            for index,(path,state,msg) in enumerate(results):
+                if index < len(remaining):
+                    completed[str(remaining[index].resolve())]={"state":state,"message":msg}
                 add_log(repo["id"],"upload",path,state,msg)
             cancelled=control.cancelled
             paused=control.paused and not cancelled
@@ -461,6 +461,8 @@ class GitNestApp:
     def pause_upload(self,e=None):
         if self.active_upload_control is None:return
         self.active_upload_control.pause()
+        if self.active_task_id is not None and self.active_task_payload is not None:
+            update_upload_task(self.active_task_id,payload=self.active_task_payload,status="paused",summary="暂停请求已发送，当前文件结束后暂停")
         self.pause_upload_button.disabled=True
         self.resume_upload_button.disabled=False
         self.status.value="正在完成当前图片，随后暂停……"
@@ -469,6 +471,8 @@ class GitNestApp:
     def resume_upload(self,e=None):
         if self.active_upload_control is None:return
         self.active_upload_control.resume()
+        if self.active_task_id is not None and self.active_task_payload is not None:
+            update_upload_task(self.active_task_id,payload=self.active_task_payload,status="running",summary="继续上传中")
         self.pause_upload_button.disabled=False
         self.resume_upload_button.disabled=True
         self.status.value="继续上传中……"
@@ -518,6 +522,13 @@ class GitNestApp:
             self.page.update()
             return
         payload=task["payload"]
+        self.local_files=[Path(p) for p in payload.get("paths",[])]
+        self.local_root=Path(payload["relative_to"]) if payload.get("relative_to") else None
+        self.local_mode="folder" if self.local_root else "files"
+        self.conflict.value=payload.get("conflict","skip")
+        self.remote_subpath.value=payload.get("remote_subpath","")
+        self.commit_message.value=payload.get("commit_message","GitNest image upload")
+        self.local_summary.value=f"恢复任务 #{task_id}：{len(self.local_files)} 张图片"
         missing=[p for p in payload.get("paths",[]) if not Path(p).is_file()]
         if missing:
             self.status.value=f"有 {len(missing)} 个原文件已不存在，请恢复原文件后再继续"
