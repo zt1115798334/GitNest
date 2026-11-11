@@ -14,11 +14,20 @@ class GiteeProvider(GitProvider):
             raise ProviderError(f"Gitee API {response.status_code}: {response.text[:500]}", response.status_code)
         return response
 
+    def _ensure_branch(self) -> None:
+        if self.branch:
+            return
+        info = self._request("GET", f"/repos/{quote(self.owner)}/{quote(self.repo)}").json()
+        self.branch = info.get("default_branch") or ""
+        if not self.branch:
+            raise ProviderError("Gitee 仓库未返回默认分支，请在仓库配置中手动填写分支")
+
     def test_connection(self) -> None:
-        self._request("GET", f"/repos/{quote(self.owner)}/{quote(self.repo)}")
+        self._ensure_branch()
         self._request("GET", f"/repos/{quote(self.owner)}/{quote(self.repo)}/branches/{quote(self.branch, safe='')}")
 
     def list_path(self, path: str = "") -> list[RemoteFile]:
+        self._ensure_branch()
         suffix = "/" + quote(path, safe="/") if path else ""
         data = self._request("GET", f"/repos/{quote(self.owner)}/{quote(self.repo)}/contents{suffix}",
                              params={"ref": self.branch}).json()
@@ -32,6 +41,7 @@ class GiteeProvider(GitProvider):
         return result
 
     def get_file(self, path: str) -> tuple[bytes, str | None]:
+        self._ensure_branch()
         data = self._request("GET", f"/repos/{quote(self.owner)}/{quote(self.repo)}/contents/{quote(path, safe='/')}",
                              params={"ref": self.branch}).json()
         encoded = data.get("content")
@@ -45,6 +55,7 @@ class GiteeProvider(GitProvider):
         return response.content, data.get("sha")
 
     def put_file(self, path: str, content: bytes, message: str, sha: str | None = None) -> dict:
+        self._ensure_branch()
         payload = {"access_token": self.token, "content": base64.b64encode(content).decode("ascii"),
                    "message": message, "branch": self.branch}
         if sha: payload["sha"] = sha
