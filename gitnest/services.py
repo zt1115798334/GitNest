@@ -72,6 +72,11 @@ def upload_paths(
     try:
         for selected in paths:
             file_path = Path(selected).expanduser().resolve()
+            if progress_callback:
+                try:
+                    progress_callback(len(results) + 1, len(paths), str(selected), "uploading", "正在上传")
+                except Exception:
+                    pass
             try:
                 if not file_path.is_file():
                     raise ValueError("文件不存在或不是普通文件")
