@@ -27,6 +27,8 @@ If PowerShell blocks activation, run \`.venv\Scripts\activate.bat\` from CMD ins
 - Recursive remote image listing, local image folder scanning, image previews and direct download.
 - Remote thumbnail gallery: originals and JPEG thumbnails are cached locally; cache keys use the full repository path to avoid collisions between same-named files.
 - A redesigned image workspace with multi-select local image picking, recursive folder scanning, local thumbnail previews, per-file removal, and clear upload settings.
+- Per-file upload task queue with queued / uploading / uploaded / skipped / failed states, progress reporting, and retry for failed local files.
+- Remote image gallery search by filename or repository path, file-type filtering, and sorting by name or file size.
 - Batch uploads with create/update detection, per-file progress, success/skip/failure summaries, custom remote subfolders, and commit messages.
 - Batch downloads that preserve paths relative to the configured remote image directory.
 - Two-way comparison by actual file-content SHA-256. Same-path files report both hashes and byte sizes; local-only, remote-only, identical, different and read-error states are distinguished.
