@@ -27,7 +27,6 @@ def test_local_thumbnail_cache_changes_when_source_changes(tmp_path):
     first = create_local_thumbnail(source, cache)
     Image.new("RGBA", (80, 60), (0, 0, 255, 128)).save(source)
     # Ensure the cache identity changes even on filesystems with coarse mtime resolution.
-    stat = source.stat()
     source.touch()
     second = create_local_thumbnail(source, cache)
 
