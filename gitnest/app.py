@@ -513,7 +513,10 @@ class GitNestApp:
         for row in self.upload_queue_rows:
             name=Path(row["path"]).name
             lines.append(f"[{labels.get(row['state'],row['state'])}] {name}  {row.get('message','')}")
-        self.queue_display.value="上传任务队列：\n"+"\n".join(lines) if lines else ""
+        shown=lines[:30]
+        if len(lines)>30:
+            shown.append(f"……还有 {len(lines)-30} 个任务未展开")
+        self.queue_display.value="上传任务队列：\n"+"\n".join(shown) if shown else ""
         self.queue_display.visible=bool(lines)
         if self.page:
             self.page.update()
