@@ -627,10 +627,7 @@ class GitNestApp:
             self.page.update()
 
     def update_upload_progress(self,index,total,path,state,message=""):
-        terminal=state in {"uploaded","skipped","failed"}
-        self.upload_progress.value=(index/total) if total and terminal else ((max(0,index-1))/total if total else 0)
         labels={"uploading":"正在上传","uploaded":"已上传","skipped":"已跳过","failed":"失败","queued":"等待继续"}
-        self.status.value=f"上传进度 {index}/{total} · {labels.get(state,state)}：{path}"
         target=str(path)
         row=next((item for item in self.upload_queue_rows
                   if str(Path(item["path"]).resolve())==str(Path(target).resolve())),None)
@@ -638,6 +635,10 @@ class GitNestApp:
             row["state"]=state
             row["message"]=message
             self.refresh_upload_queue()
+        done=sum(1 for item in self.upload_queue_rows
+                 if item["state"] in {"uploaded","skipped","failed"})
+        self.upload_progress.value=(done/total) if total else 1
+        self.status.value=f"上传进度 {done}/{total} · {labels.get(state,state)}：{Path(target).name}"
         self.page.update()
 
     async def run_background(self,fn,*args,**kwargs):
