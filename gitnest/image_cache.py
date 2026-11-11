@@ -43,3 +43,32 @@ def save_remote_image(content: bytes, remote_path: str, cache_root: str | Path) 
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValueError(f"无法生成图片缩略图：{remote_path}（{exc}）") from exc
     return original, thumbnail
+
+
+def create_local_thumbnail(path: str | Path, cache_root: str | Path) -> Path:
+    """Create or reuse a small local preview without loading the original into memory."""
+    source_path = Path(path).expanduser().resolve()
+    stat = source_path.stat()
+    identity = f"{source_path}\\0{stat.st_size}\\0{stat.st_mtime_ns}"
+    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    root = Path(cache_root).expanduser().resolve() / "local-thumbs"
+    root.mkdir(parents=True, exist_ok=True)
+    thumbnail = root / f"{key}.jpg"
+    if thumbnail.is_file():
+        return thumbnail
+
+    try:
+        with Image.open(source_path) as source:
+            image = ImageOps.exif_transpose(source)
+            image.thumbnail((480, 360), Image.Resampling.LANCZOS)
+            if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+                rgba = image.convert("RGBA")
+                background = Image.new("RGB", rgba.size, "white")
+                background.paste(rgba, mask=rgba.getchannel("A"))
+                image = background
+            else:
+                image = image.convert("RGB")
+            image.save(thumbnail, format="JPEG", quality=82, optimize=True)
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise ValueError(f"无法生成图片缩略图：{source_path.name}（{exc}）") from exc
+    return thumbnail
