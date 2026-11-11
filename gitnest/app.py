@@ -423,8 +423,8 @@ class GitNestApp:
             self.page.update()
 
     def update_upload_progress(self,index,total,path,state,message="")
-        self.upload_progress.value=index/total if total else 1
-        labels={"uploaded":"已上传","skipped":"已跳过","failed":"失败"}
+        self.upload_progress.value=((index-1)/total if state=="uploading" else index/total) if total else 1
+        labels={"uploading":"正在上传","uploaded":"已上传","skipped":"已跳过","failed":"失败"}
         self.status.value=f"上传进度 {index}/{total} · {labels.get(state,state)}：{path}"
         if 0 < index <= len(self.upload_queue_rows):
             row=self.upload_queue_rows[index-1]
@@ -508,7 +508,7 @@ class GitNestApp:
         self.page.update()
 
     def refresh_upload_queue(self):
-        labels={"queued":"排队中","uploaded":"成功","skipped":"已跳过","failed":"失败"}
+        labels={"queued":"排队中","uploading":"正在上传","uploaded":"成功","skipped":"已跳过","failed":"失败"}
         lines=[]
         for row in self.upload_queue_rows:
             name=Path(row["path"]).name
