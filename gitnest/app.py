@@ -26,6 +26,20 @@ class GitNestApp:
         self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260)
         self.upload_progress=ft.ProgressBar(value=0, width=320, visible=False)
         self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700, visible=False)
+        self.upload_queue_rows=[]
+        self.queue_display=ft.Text(selectable=True,size=12,color=ft.Colors.GREY_700,visible=False)
+        self.retry_failed_button=ft.OutlinedButton("重试失败任务",icon=ft.Icons.REPLAY,on_click=self.retry_failed_uploads,visible=False)
+        self.remote_cache={}
+        self.remote_search=ft.TextField(label="搜索图片名称或路径",prefix_icon=ft.Icons.SEARCH,width=280,on_change=self.filter_remote_gallery)
+        self.remote_type=ft.Dropdown(label="格式",width=130,value="all",options=[
+            ft.DropdownOption("all","全部格式"),ft.DropdownOption("jpg","JPG"),ft.DropdownOption("png","PNG"),
+            ft.DropdownOption("webp","WEBP"),ft.DropdownOption("gif","GIF"),ft.DropdownOption("other","其他")],
+            on_select=self.filter_remote_gallery)
+        self.remote_sort=ft.Dropdown(label="排序",width=150,value="name_asc",options=[
+            ft.DropdownOption("name_asc","名称升序"),ft.DropdownOption("name_desc","名称降序"),
+            ft.DropdownOption("size_desc","文件最大优先"),ft.DropdownOption("size_asc","文件最小优先")],
+            on_select=self.filter_remote_gallery)
+        self.remote_count=ft.Text(color=ft.Colors.GREY_600,size=12)
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
         self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
         self.local_folder=ft.TextField(label="本地图片目录", expand=True)
@@ -98,9 +112,10 @@ class GitNestApp:
             content=ft.Column(spacing=10,controls=[
                 ft.Row([ft.Column([
                     ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
-                    ft.Text("浏览仓库中的图片，支持预览、单张下载和批量下载。",size=12,color=ft.Colors.GREY_600)
+                    ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
                 ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote),
                     ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)]),
+                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
                 self.gallery
             ])
         )
@@ -120,6 +135,8 @@ class GitNestApp:
                     ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True,spacing=10),
                     self.confirm_overwrite,
                     self.status,
+                    self.queue_display,
+                    self.retry_failed_button,
                     self.upload_details
                 ])),
             self.remote_section,
@@ -330,12 +347,15 @@ class GitNestApp:
             self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
             self.upload_details.value=""
             self.upload_details.visible=False
+            self.retry_failed_button.visible=False
+            self.upload_queue_rows=[{"path":str(p),"state":"queued","message":"等待上传"} for p in self.local_files]
+            self.refresh_upload_queue()
             self.confirm_overwrite.visible=self.conflict.value=="overwrite"
             self.page.update()
             root=self.local_root if self.local_mode=="folder" else None
             loop=asyncio.get_running_loop()
             def progress_callback(index,total,path,state,message):
-                loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state)
+                loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state,message)
             results=await self.run_background(
                 upload_paths,repo,self.token_for(repo),self.local_files,
                 self.conflict.value,self.commit_message.value or "GitNest image upload",
@@ -343,9 +363,13 @@ class GitNestApp:
             )
             if results is None:return
             counts={"uploaded":0,"skipped":0,"failed":0}
-            for path,state,msg in results:
+            for index,(path,state,msg) in enumerate(results):
                 counts[state]=counts.get(state,0)+1
+                if index < len(self.upload_queue_rows):
+                    self.upload_queue_rows[index].update({"state":state,"message":msg})
                 add_log(repo["id"],"upload",path,state,msg)
+            self.refresh_upload_queue()
+            self.retry_failed_button.visible=counts["failed"]>0
             self.confirm_overwrite.value=False
             self.status.value=f"上传结束：成功 {counts['uploaded']} · 跳过 {counts['skipped']} · 失败 {counts['failed']}"
             detail_lines=[]
@@ -355,6 +379,7 @@ class GitNestApp:
                     detail_lines.append(f"[{label}] {path}\n  {msg}")
             if detail_lines:
                 self.upload_details.value="上传明细：\n" + "\n".join(detail_lines[:30])
+                self.upload_details.visible=True
                 if len(detail_lines)>30:
                     self.upload_details.value += f"\n……另有 {len(detail_lines)-30} 条未展开"
             elif counts["uploaded"]:
@@ -366,7 +391,9 @@ class GitNestApp:
             self.upload_progress.value=1
             if counts["uploaded"]:
                 self.remote_items=[]
+                self.remote_cache={}
                 self.gallery.controls.clear()
+                self.gallery.visible=False
         except Exception as ex:
             self.status.value=f"上传失败：{ex}"
         finally:
@@ -395,10 +422,15 @@ class GitNestApp:
             self.status.value=f"选择目录失败：{ex}"
             self.page.update()
 
-    def update_upload_progress(self,index,total,path,state):
+    def update_upload_progress(self,index,total,path,state,message="")
         self.upload_progress.value=index/total if total else 1
         labels={"uploaded":"已上传","skipped":"已跳过","failed":"失败"}
         self.status.value=f"上传进度 {index}/{total} · {labels.get(state,state)}：{path}"
+        if 0 < index <= len(self.upload_queue_rows):
+            row=self.upload_queue_rows[index-1]
+            row["state"]=state
+            row["message"]=message
+            self.refresh_upload_queue()
         self.page.update()
 
     async def run_background(self,fn,*args,**kwargs):
@@ -408,33 +440,94 @@ class GitNestApp:
 
     async def load_remote(self,e):
         try:
-            repo=self.current_repo();items=await self.run_background(remote_images,repo,self.token_for(repo))
+            repo=self.current_repo()
+            items=await self.run_background(remote_images,repo,self.token_for(repo))
             if items is None:return
-            self.remote_items=items;self.gallery.controls=[]
-            self.gallery.visible=bool(items)
-            self.status.value=f"已读取 {len(items)} 张图片，正在生成缩略图……"; self.page.update()
+            self.remote_items=items
+            self.remote_cache={}
+            self.gallery.controls=[]
+            self.gallery.visible=False
+            self.status.value=f"已读取 {len(items)} 张图片，正在生成缩略图……"
+            self.page.update()
             cached=await self.run_background(cache_remote_thumbnails,repo,self.token_for(repo),items,str(CACHE_DIR))
             if cached is None:return
-            self.gallery.controls=[]
-            self.gallery.visible=bool(items)
-            for item in items:
-                entry=cached.get(item.path,{})
-                image_control=(ft.Image(src=entry["thumbnail"],width=180,height=120,fit=ft.BoxFit.CONTAIN)
-                               if entry.get("thumbnail") else
-                               ft.Container(height=120,alignment=ft.Alignment.CENTER,
-                                   content=ft.Column([ft.Icon(ft.Icons.BROKEN_IMAGE,size=36),
-                                       ft.Text("缩略图不可用",size=11)],alignment=ft.MainAxisAlignment.CENTER)))
-                card=ft.Container(border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),border_radius=10,padding=8,
-                    content=ft.Column([ft.Container(height=126,alignment=ft.Alignment.CENTER,content=image_control),
-                        ft.Text(item.name,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS,weight=ft.FontWeight.BOLD),
-                        ft.Text(f"{item.size:,} bytes",size=11,color=ft.Colors.GREY_600),
-                        ft.Row([ft.IconButton(ft.Icons.PREVIEW,tooltip="查看大图",on_click=lambda e,it=item:self.preview_image(it)),
-                                ft.IconButton(ft.Icons.DOWNLOAD,tooltip="下载",on_click=lambda e,it=item:self.download_single(it))],alignment=ft.MainAxisAlignment.END)]))
-                self.gallery.controls.append(card)
+            self.remote_cache=cached
+            self.render_remote_gallery()
             failed=sum(1 for value in cached.values() if value.get("error"))
             self.status.value=f"远程读取完成：{len(items)} 张图片；缩略图失败 {failed} 张"
             self.page.update()
-        except Exception as ex:self.status.value=f"读取失败：{ex}";self.page.update()
+        except Exception as ex:
+            self.status.value=f"读取失败：{ex}"
+            self.page.update()
+
+    def filter_remote_gallery(self,e=None):
+        self.render_remote_gallery()
+
+    def render_remote_gallery(self):
+        query=(self.remote_search.value or "").strip().casefold()
+        image_items=[]
+        for item in self.remote_items:
+            suffix=Path(item.name).suffix.lower().lstrip(".")
+            kind=suffix if suffix in {"jpg","jpeg","png","webp","gif"} else "other"
+            selected=self.remote_type.value or "all"
+            if selected!="all" and not (
+                selected=="jpg" and kind in {"jpg","jpeg"} or selected=="other" and kind=="other" or kind==selected
+            ):
+                continue
+            if query and query not in item.name.casefold() and query not in item.path.casefold():
+                continue
+            image_items.append(item)
+        sort_mode=self.remote_sort.value or "name_asc"
+        if sort_mode=="name_desc":
+            image_items.sort(key=lambda x:x.name.casefold(),reverse=True)
+        elif sort_mode=="size_desc":
+            image_items.sort(key=lambda x:x.size,reverse=True)
+        elif sort_mode=="size_asc":
+            image_items.sort(key=lambda x:x.size)
+        else:
+            image_items.sort(key=lambda x:x.name.casefold())
+        self.gallery.controls=[]
+        self.gallery.visible=bool(image_items)
+        self.remote_count.value=f"显示 {len(image_items)} / 共 {len(self.remote_items)} 张"
+        for item in image_items:
+            entry=self.remote_cache.get(item.path,{})
+            image_control=(ft.Image(src=entry["thumbnail"],width=180,height=120,fit=ft.BoxFit.CONTAIN)
+                           if entry.get("thumbnail") else
+                           ft.Container(height=120,alignment=ft.Alignment.CENTER,
+                               content=ft.Column([ft.Icon(ft.Icons.BROKEN_IMAGE,size=36),
+                                   ft.Text("缩略图不可用",size=11)],alignment=ft.MainAxisAlignment.CENTER)))
+            card=ft.Container(border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),border_radius=10,padding=8,
+                content=ft.Column([ft.Container(height=126,alignment=ft.Alignment.CENTER,content=image_control),
+                    ft.Text(item.name,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS,weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{item.size:,} bytes",size=11,color=ft.Colors.GREY_600),
+                    ft.Text(item.path,size=10,color=ft.Colors.GREY_500,max_lines=2,overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Row([ft.IconButton(ft.Icons.PREVIEW,tooltip="查看大图",on_click=lambda e,it=item:self.preview_image(it)),
+                            ft.IconButton(ft.Icons.DOWNLOAD,tooltip="下载",on_click=lambda e,it=item:self.download_single(it))],
+                           alignment=ft.MainAxisAlignment.END)]))
+            self.gallery.controls.append(card)
+        self.page.update()
+
+    def refresh_upload_queue(self):
+        labels={"queued":"排队中","uploaded":"成功","skipped":"已跳过","failed":"失败"}
+        lines=[]
+        for row in self.upload_queue_rows:
+            name=Path(row["path"]).name
+            lines.append(f"[{labels.get(row['state'],row['state'])}] {name}  {row.get('message','')}")
+        self.queue_display.value="上传任务队列：\n"+"\n".join(lines) if lines else ""
+        self.queue_display.visible=bool(lines)
+        if self.page:
+            self.page.update()
+
+    async def retry_failed_uploads(self,e=None):
+        failed=[Path(row["path"]) for row in self.upload_queue_rows if row["state"]=="failed"]
+        failed=[path for path in failed if path.is_file()]
+        if not failed:
+            self.status.value="没有可重试的失败任务（请检查原文件是否仍存在）"
+            self.page.update()
+            return
+        self.local_files=failed
+        self.local_summary.value=f"准备重试 {len(failed)} 张失败图片"
+        await self.upload_selected(e)
 
     async def preview_image(self,item):
         try:
