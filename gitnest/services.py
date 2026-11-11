@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Event
 from gitnest.providers import create_provider
 from gitnest.providers.base import ProviderError
 from gitnest.images import scan_images, safe_remote_path, safe_local_destination, sha256_bytes, validate_image
@@ -6,6 +7,37 @@ from gitnest.image_cache import save_remote_image
 
 def with_provider(repository: dict, token: str):
     return create_provider(repository, token)
+
+class UploadControl:
+    """Thread-safe pause/resume/cancel checkpoints between individual file uploads."""
+    def __init__(self):
+        self._resume=Event()
+        self._resume.set()
+        self._cancel=Event()
+
+    def pause(self):
+        self._resume.clear()
+
+    def resume(self):
+        self._resume.set()
+
+    def cancel(self):
+        self._cancel.set()
+        self._resume.set()
+
+    @property
+    def cancelled(self):
+        return self._cancel.is_set()
+
+    @property
+    def paused(self):
+        return not self._resume.is_set()
+
+    def checkpoint(self):
+        while not self._cancel.is_set():
+            if self._resume.wait(0.2):
+                return not self._cancel.is_set()
+        return False
 
 def test_repository(repository: dict, token: str) -> None:
     provider = with_provider(repository, token)
@@ -47,8 +79,9 @@ def upload_paths(
     remote_subpath: str = "",
     relative_to: str | Path | None = None,
     progress_callback=None,
+    control: UploadControl | None = None,
 ):
-    """Upload selected image paths and optionally report each completed file."""
+    """Upload images with optional cooperative pause/resume/cancel checkpoints."""
     if conflict not in {"skip", "overwrite", "rename"}:
         raise ValueError("未知的上传冲突策略")
     base = repository["base_path"].strip("/")
@@ -71,6 +104,8 @@ def upload_paths(
 
     try:
         for selected in paths:
+            if control is not None and not control.checkpoint():
+                break
             file_path = Path(selected).expanduser().resolve()
             if progress_callback:
                 try:
