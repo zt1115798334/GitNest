@@ -132,6 +132,10 @@ class GitNestApp:
             ft.DropdownOption("skip","跳过已存在文件"),ft.DropdownOption("overwrite","覆盖远程文件"),
             ft.DropdownOption("rename","自动重命名")])
         self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",width=280)
+        self.upload_workers=ft.Dropdown(label="并发线程",value="3",width=130,options=[
+            ft.DropdownOption("1","1 线程"),ft.DropdownOption("2","2 线程"),
+            ft.DropdownOption("3","3 线程"),ft.DropdownOption("4","4 线程"),
+            ft.DropdownOption("5","5 线程")])
         self.confirm_overwrite=ft.Checkbox(label="我确认覆盖远程同路径图片",value=False,visible=False)
         self.preview_text=ft.Text(selectable=True)
         self.status=ft.Text("选择仓库和本地图片，即可开始管理",color=ft.Colors.GREY_600)
@@ -183,7 +187,7 @@ class GitNestApp:
                     ft.Row([ft.Column([ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD,color="#202B3C"),
                         ft.Text("设置远程目录、文件冲突规则和提交说明",size=11,color="#8993A5")],spacing=3),
                         ft.Container(expand=True),ft.Icon(ft.Icons.TUNE_ROUNDED,color="#8B95A6")]),
-                    ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True,spacing=10),
+                    ft.Row([self.remote_subpath,self.conflict,self.commit_message,self.upload_workers],wrap=True,spacing=10),
                     self.confirm_overwrite,
                     self.status,
                     self.queue_display,
@@ -409,6 +413,7 @@ class GitNestApp:
                 "conflict":self.conflict.value,
                 "commit_message":self.commit_message.value or "GitNest image upload",
                 "remote_subpath":self.remote_subpath.value or "",
+                "max_workers":int(self.upload_workers.value or "3"),
                 "completed":{}
             }
             task_id=create_upload_task(repo["id"],payload)
@@ -465,7 +470,8 @@ class GitNestApp:
                 upload_paths,repo,self.token_for(repo),remaining,
                 payload.get("conflict","skip"),payload.get("commit_message","GitNest image upload"),
                 payload.get("remote_subpath",""),payload.get("relative_to"),
-                progress_callback=progress_callback,control=control
+                progress_callback=progress_callback,control=control,
+                max_workers=int(payload.get("max_workers",3))
             )
             if results is None:
                 update_upload_task(task_id,payload=payload,status="failed",summary="上传执行异常，请检查日志")
@@ -611,11 +617,14 @@ class GitNestApp:
             self.page.update()
 
     def update_upload_progress(self,index,total,path,state,message=""):
-        self.upload_progress.value=((index-1)/total if state=="uploading" else index/total) if total else 1
-        labels={"uploading":"正在上传","uploaded":"已上传","skipped":"已跳过","failed":"失败"}
+        terminal=state in {"uploaded","skipped","failed"}
+        self.upload_progress.value=(index/total) if total and terminal else ((max(0,index-1))/total if total else 0)
+        labels={"uploading":"正在上传","uploaded":"已上传","skipped":"已跳过","failed":"失败","queued":"等待继续"}
         self.status.value=f"上传进度 {index}/{total} · {labels.get(state,state)}：{path}"
-        if 0 < index <= len(self.upload_queue_rows):
-            row=self.upload_queue_rows[index-1]
+        target=str(path)
+        row=next((item for item in self.upload_queue_rows
+                  if str(Path(item["path"]).resolve())==str(Path(target).resolve())),None)
+        if row is not None:
             row["state"]=state
             row["message"]=message
             self.refresh_upload_queue()
