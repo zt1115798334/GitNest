@@ -5,7 +5,7 @@ import flet as ft
 from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs, create_upload_task, update_upload_task, upload_task_rows, get_upload_task
 from gitnest.security import save_token, get_token, delete_token
 from gitnest.services import test_repository, remote_images, download_one, download_all, upload_paths, compare_folders, cache_remote_thumbnails, UploadControl
-from gitnest.image_cache import save_remote_image, create_local_thumbnail
+from gitnest.image_cache import create_local_thumbnail
 from gitnest.images import scan_images
 from gitnest.config import CACHE_DIR
 
