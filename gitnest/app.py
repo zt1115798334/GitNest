@@ -408,7 +408,8 @@ class GitNestApp:
             if state in {"uploaded","skipped","failed"} and 0 < index <= len(remaining):
                 completed[str(remaining[index-1].resolve())]={"state":state,"message":message}
                 update_upload_task(task_id,payload=payload,summary=f"已处理 {len(completed)} 项")
-            loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state,message)
+            overall_index=paths.index(remaining[index-1])+1 if 0 < index <= len(remaining) else index
+            loop.call_soon_threadsafe(self.update_upload_progress,overall_index,len(paths),path,state,message)
         try:
             results=await self.run_background(
                 upload_paths,repo,self.token_for(repo),remaining,
