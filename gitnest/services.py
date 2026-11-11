@@ -1,19 +1,23 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
+from time import sleep
 from gitnest.providers import create_provider
 from gitnest.providers.base import ProviderError
 from gitnest.images import scan_images, safe_remote_path, safe_local_destination, sha256_bytes, validate_image
 from gitnest.image_cache import save_remote_image
 
+
 def with_provider(repository: dict, token: str):
     return create_provider(repository, token)
+
 
 class UploadControl:
     """Thread-safe pause/resume/cancel checkpoints between individual file uploads."""
     def __init__(self):
-        self._resume=Event()
+        self._resume = Event()
         self._resume.set()
-        self._cancel=Event()
+        self._cancel = Event()
 
     def pause(self):
         self._resume.clear()
@@ -39,36 +43,47 @@ class UploadControl:
                 return not self._cancel.is_set()
         return False
 
+
 def test_repository(repository: dict, token: str) -> None:
     provider = with_provider(repository, token)
-    try: provider.test_connection()
-    finally: provider.close()
+    try:
+        provider.test_connection()
+    finally:
+        provider.close()
+
 
 def remote_images(repository: dict, token: str):
     provider = with_provider(repository, token)
-    try: return provider.list_images(repository["base_path"])
-    finally: provider.close()
+    try:
+        return provider.list_images(repository["base_path"])
+    finally:
+        provider.close()
+
 
 def download_one(repository: dict, token: str, remote_path: str, target_root: str):
     provider = with_provider(repository, token)
     try:
         root = repository["base_path"].strip("/")
-        rel = remote_path[len(root)+1:] if root and remote_path.startswith(root + "/") else remote_path
+        rel = remote_path[len(root) + 1:] if root and remote_path.startswith(root + "/") else remote_path
         destination = safe_local_destination(target_root, rel)
         content, _ = provider.get_file(remote_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
         return destination
-    finally: provider.close()
+    finally:
+        provider.close()
+
 
 def download_all(repository: dict, token: str, target_root: str, remote_items: list):
-    results=[]
+    results = []
     for item in remote_items:
         try:
-            path=download_one(repository, token, item.path, target_root)
+            path = download_one(repository, token, item.path, target_root)
             results.append((item.path, True, str(path)))
-        except Exception as exc: results.append((item.path, False, str(exc)))
+        except Exception as exc:
+            results.append((item.path, False, str(exc)))
     return results
+
 
 def upload_paths(
     repository: dict,
@@ -80,45 +95,71 @@ def upload_paths(
     relative_to: str | Path | None = None,
     progress_callback=None,
     control: UploadControl | None = None,
+    max_workers: int = 3,
 ):
-    """Upload images with optional cooperative pause/resume/cancel checkpoints."""
+    """Upload files concurrently with one isolated provider/client per worker.
+
+    GitHub/Gitee branch updates can race when several files are committed at once.
+    A bounded retry handles non-fast-forward/conflict responses without sharing
+    an HTTP client between threads. Results are returned in the original input order.
+    """
     if conflict not in {"skip", "overwrite", "rename"}:
         raise ValueError("未知的上传冲突策略")
+    max_workers = max(1, min(int(max_workers), 5))
     base = repository["base_path"].strip("/")
     subpath = remote_subpath.strip().replace("\\", "/").strip("/")
     if subpath:
         subpath = safe_remote_path(subpath)
     remote_root = "/".join(part for part in (base, subpath) if part)
     root = Path(relative_to).expanduser().resolve() if relative_to else None
-    provider = with_provider(repository, token)
-    results = []
+    progress_lock = Lock()
+    completed_count = 0
+    results_by_index = {}
 
-    def record(path, state, message):
-        results.append((path, state, message))
+    def notify(index, total, path, state, message):
         if progress_callback:
             try:
-                progress_callback(len(results), len(paths), path, state, message)
+                progress_callback(index, total, path, state, message)
             except Exception:
-                # A UI progress observer must never interrupt a repository write.
+                # UI observers must never interrupt repository writes.
                 pass
 
-    try:
-        for selected in paths:
-            if control is not None and not control.checkpoint():
-                break
-            file_path = Path(selected).expanduser().resolve()
-            if progress_callback:
-                try:
-                    progress_callback(len(results) + 1, len(paths), str(selected), "uploading", "正在上传")
-                except Exception:
-                    pass
-            try:
-                if not file_path.is_file():
-                    raise ValueError("文件不存在或不是普通文件")
-                relative = file_path.relative_to(root).as_posix() if root else file_path.name
-                content = file_path.read_bytes()
-                validate_image(content, relative)
-                remote_path = safe_remote_path(f"{remote_root}/{relative}" if remote_root else relative)
+    def upload_one(index, selected):
+        nonlocal completed_count
+        file_path = Path(selected).expanduser().resolve()
+        display_path = str(selected)
+        relative = display_path
+        provider = None
+
+        def finish(state, message):
+            nonlocal completed_count
+            with progress_lock:
+                completed_count += 1
+                current = completed_count
+            result = (relative, state, message)
+            results_by_index[index] = result
+            notify(current, len(paths), relative, state, message)
+            return result
+
+        if control is not None and not control.checkpoint():
+            results_by_index[index] = (display_path, "queued", "任务取消，等待下次继续")
+            return results_by_index[index]
+
+        notify(completed_count + 1, len(paths), display_path, "uploading", "正在上传")
+        try:
+            if not file_path.is_file():
+                raise ValueError("文件不存在或不是普通文件")
+            relative = file_path.relative_to(root).as_posix() if root else file_path.name
+            content = file_path.read_bytes()
+            validate_image(content, relative)
+            remote_path = safe_remote_path(f"{remote_root}/{relative}" if remote_root else relative)
+            provider = with_provider(repository, token)
+
+            # Contents APIs create a commit per file. Retry branch update conflicts
+            # after refreshing the remote SHA; never reuse a client across threads.
+            for attempt in range(4):
+                if control is not None and not control.checkpoint():
+                    return finish("queued", "任务取消，等待下次继续")
                 remote_sha = None
                 try:
                     _, remote_sha = provider.get_file(remote_path)
@@ -128,32 +169,55 @@ def upload_paths(
                         exists = False
                     else:
                         raise
+
+                target_path = remote_path
+                target_sha = remote_sha if exists and conflict == "overwrite" else None
                 if exists and conflict == "skip":
-                    record(relative, "skipped", "远程已存在，按策略跳过")
-                    continue
+                    return finish("skipped", "远程已存在，按策略跳过")
                 if exists and conflict == "rename":
                     p = Path(relative)
                     candidate = f"{p.stem}_{sha256_bytes(content)[:8]}{p.suffix}"
                     renamed = (p.parent / candidate).as_posix()
-                    remote_path = safe_remote_path(f"{remote_root}/{renamed}" if remote_root else renamed)
+                    target_path = safe_remote_path(f"{remote_root}/{renamed}" if remote_root else renamed)
                     try:
-                        provider.get_file(remote_path)
-                        record(relative, "skipped", f"重命名目标已存在：{remote_path}")
-                        continue
+                        provider.get_file(target_path)
+                        return finish("skipped", f"重命名目标已存在：{target_path}")
                     except ProviderError as exc:
                         if exc.status_code != 404:
                             raise
-                    remote_sha = None
-                provider.put_file(
-                    remote_path, content, f"{commit_prefix}: {relative}",
-                    sha=remote_sha if exists and conflict == "overwrite" else None,
-                )
-                record(relative, "uploaded", f"已提交到 {remote_path}")
+                    target_sha = None
+
+                try:
+                    provider.put_file(
+                        target_path, content, f"{commit_prefix}: {relative}", sha=target_sha
+                    )
+                    return finish("uploaded", f"已提交到 {target_path}")
+                except ProviderError as exc:
+                    if exc.status_code == 409 and attempt < 3:
+                        sleep(0.25 * (attempt + 1))
+                        continue
+                    raise
+            raise RuntimeError("远程分支持续发生提交冲突，请稍后重试")
+        except Exception as exc:
+            return finish("failed", str(exc))
+        finally:
+            if provider is not None:
+                provider.close()
+
+    if not paths:
+        return []
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="gitnest-upload") as executor:
+        futures = {
+            executor.submit(upload_one, index, selected): index
+            for index, selected in enumerate(paths)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                future.result()
             except Exception as exc:
-                record(str(selected), "failed", str(exc))
-        return results
-    finally:
-        provider.close()
+                results_by_index[index] = (str(paths[index]), "failed", str(exc))
+    return [results_by_index[index] for index in range(len(paths))]
 
 
 def upload_folder(
@@ -164,6 +228,7 @@ def upload_folder(
     commit_prefix: str = "GitNest upload",
     remote_subpath: str = "",
     progress_callback=None,
+    max_workers: int = 3,
 ):
     root = Path(local_root).expanduser().resolve()
     files = scan_images(root)
@@ -171,8 +236,9 @@ def upload_folder(
         raise ValueError("所选目录中没有找到支持的图片")
     return upload_paths(
         repository, token, files, conflict, commit_prefix, remote_subpath, root,
-        progress_callback=progress_callback,
+        progress_callback=progress_callback, max_workers=max_workers,
     )
+
 
 def cache_remote_thumbnails(repository: dict, token: str, remote_items: list, cache_root: str):
     """Download remote images once and create local originals + thumbnails."""
@@ -190,12 +256,9 @@ def cache_remote_thumbnails(repository: dict, token: str, remote_items: list, ca
     finally:
         provider.close()
 
-def compare_folders(repository: dict, token: str, local_root: str, remote_items: list):
-    """Compare file content, not provider-specific Git blob hashes.
 
-    A single provider client is reused for all remote reads. SHA-256 values and
-    byte sizes are returned to make every comparison explainable in the UI.
-    """
+def compare_folders(repository: dict, token: str, local_root: str, remote_items: list):
+    """Compare file content, not provider-specific Git blob hashes."""
     root = Path(local_root).expanduser().resolve()
     local_files = scan_images(root)
     base = repository["base_path"].strip("/")
