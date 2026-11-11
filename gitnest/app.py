@@ -28,7 +28,7 @@ class GitNestApp:
         self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700, visible=False)
         self.upload_queue_rows=[]
         self.queue_display=ft.Text(selectable=True,size=12,color=ft.Colors.GREY_700,visible=False)
-        self.retry_failed_button=ft.OutlinedButton("重试失败任务",icon=ft.Icons.REPLAY,on_click=self.retry_failed_uploads,visible=False)
+        self.retry_failed_button=ft.OutlinedButton("重试失败任务",icon=ft.Icons.REFRESH,on_click=self.retry_failed_uploads,visible=False)
         self.remote_cache={}
         self.remote_search=ft.TextField(label="搜索图片名称或路径",prefix_icon=ft.Icons.SEARCH,width=280,on_change=self.filter_remote_gallery)
         self.remote_type=ft.Dropdown(label="格式",width=130,value="all",options=[
@@ -422,7 +422,7 @@ class GitNestApp:
             self.status.value=f"选择目录失败：{ex}"
             self.page.update()
 
-    def update_upload_progress(self,index,total,path,state,message="")
+    def update_upload_progress(self,index,total,path,state,message=""):
         self.upload_progress.value=((index-1)/total if state=="uploading" else index/total) if total else 1
         labels={"uploading":"正在上传","uploaded":"已上传","skipped":"已跳过","failed":"失败"}
         self.status.value=f"上传进度 {index}/{total} · {labels.get(state,state)}：{path}"
