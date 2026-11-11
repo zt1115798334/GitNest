@@ -408,12 +408,15 @@ class GitNestApp:
         self.page.run_task(redraw)
 
     def clear_local_selection(self,e=None):
+        self._local_preview_generation=getattr(self,"_local_preview_generation",0)+1
         self.local_files=[]
         self.local_gallery.visible=False
         self.local_mode="files"
         self.local_root=None
         self.local_folder.value=""
         self.local_gallery.controls.clear()
+        self.local_load_more.visible=False
+        self.local_load_more.disabled=False
         self.local_summary.value="尚未选择图片"
         self.upload_details.value=""
         self.upload_button.disabled=True
