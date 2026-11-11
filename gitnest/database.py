@@ -25,6 +25,16 @@ def initialize() -> None:
             action TEXT NOT NULL, file_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
             message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS upload_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repository_id INTEGER,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            summary TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL)""")
+        db.execute("UPDATE upload_tasks SET status='paused', summary='程序上次未正常结束，可继续或取消' WHERE status='running'")
 
 def repositories() -> list[dict]:
     with connection() as db:
@@ -52,3 +62,43 @@ def logs(limit: int = 300) -> list[dict]:
     with connection() as db:
         return [dict(r) for r in db.execute("""SELECT l.*,r.name AS repository_name FROM operation_logs l
             LEFT JOIN repositories r ON r.id=l.repository_id ORDER BY l.id DESC LIMIT ?""", (limit,))]
+
+
+def create_upload_task(repository_id: int, payload: dict) -> int:
+    import json
+    with connection() as db:
+        cur=db.execute("INSERT INTO upload_tasks(repository_id,payload_json,status,summary) VALUES(?,?,'queued','等待上传')",
+                       (repository_id,json.dumps(payload,ensure_ascii=False)))
+        return int(cur.lastrowid)
+
+def update_upload_task(task_id: int, *, payload: dict | None = None,
+                       status: str | None = None, summary: str | None = None) -> None:
+    import json
+    fields=[]
+    values=[]
+    if payload is not None:
+        fields.append("payload_json=?");values.append(json.dumps(payload,ensure_ascii=False))
+    if status is not None:
+        fields.append("status=?");values.append(status)
+    if summary is not None:
+        fields.append("summary=?");values.append(summary[:1500])
+    if not fields:return
+    fields.append("updated_at=CURRENT_TIMESTAMP")
+    values.append(task_id)
+    with connection() as db:
+        db.execute(f"UPDATE upload_tasks SET {', '.join(fields)} WHERE id=?",values)
+
+def upload_task_rows(limit: int = 100) -> list[dict]:
+    import json
+    with connection() as db:
+        rows=db.execute("SELECT * FROM upload_tasks ORDER BY id DESC LIMIT ?",(limit,)).fetchall()
+    result=[]
+    for row in rows:
+        item=dict(row)
+        try:item["payload"]=json.loads(item.pop("payload_json"))
+        except (ValueError,TypeError):item["payload"]={}
+        result.append(item)
+    return result
+
+def get_upload_task(task_id: int) -> dict | None:
+    return next((row for row in upload_task_rows(500) if row["id"]==task_id),None)
