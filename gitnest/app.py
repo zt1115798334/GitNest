@@ -1,9 +1,9 @@
 import asyncio
 from pathlib import Path
 import flet as ft
-from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs
+from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs, create_upload_task, update_upload_task, upload_task_rows, get_upload_task
 from gitnest.security import save_token, get_token, delete_token
-from gitnest.services import test_repository, remote_images, download_one, download_all, upload_paths, compare_folders, cache_remote_thumbnails
+from gitnest.services import test_repository, remote_images, download_one, download_all, upload_paths, compare_folders, cache_remote_thumbnails, UploadControl
 from gitnest.image_cache import save_remote_image
 from gitnest.images import scan_images
 from gitnest.config import CACHE_DIR
@@ -28,6 +28,13 @@ class GitNestApp:
         self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700, visible=False)
         self.upload_queue_rows=[]
         self.queue_display=ft.Text(selectable=True,size=12,color=ft.Colors.GREY_700,visible=False)
+        self.active_upload_control=None
+        self.active_task_id=None
+        self.active_task_payload=None
+        self.pause_upload_button=ft.OutlinedButton("暂停上传",icon=ft.Icons.PAUSE,on_click=self.pause_upload,disabled=True)
+        self.resume_upload_button=ft.OutlinedButton("继续上传",icon=ft.Icons.PLAY_ARROW,on_click=self.resume_upload,disabled=True)
+        self.cancel_upload_button=ft.OutlinedButton("取消任务",icon=ft.Icons.CANCEL,on_click=self.cancel_upload,disabled=True)
+        self.saved_tasks=ft.Column(spacing=4)
         self.retry_failed_button=ft.OutlinedButton("重试失败任务",icon=ft.Icons.REFRESH,on_click=self.retry_failed_uploads,visible=False)
         self.remote_cache={}
         self.remote_search=ft.TextField(label="搜索图片名称或路径",prefix_icon=ft.Icons.SEARCH,width=280,on_change=self.filter_remote_gallery)
@@ -57,6 +64,7 @@ class GitNestApp:
             on_change=self.navigate)
         self.page.add(ft.Row([self.navigation,ft.VerticalDivider(width=1),self.body],expand=True))
         self.refresh_repositories()
+        self.refresh_saved_tasks()
 
     def build_repo_page(self):
         self.platform=ft.Dropdown(label="平台",value="github",options=[ft.DropdownOption("github","GitHub"),ft.DropdownOption("gitee","Gitee")],width=160)
@@ -136,8 +144,12 @@ class GitNestApp:
                     self.confirm_overwrite,
                     self.status,
                     self.queue_display,
+                    ft.Row([self.pause_upload_button,self.resume_upload_button,self.cancel_upload_button],wrap=True),
                     self.retry_failed_button,
-                    self.upload_details
+                    self.upload_details,
+                    ft.Divider(),
+                    ft.Text("已保存的上传任务",size=14,weight=ft.FontWeight.BOLD),
+                    self.saved_tasks
                 ])),
             self.remote_section,
             ft.Container(padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
@@ -340,67 +352,178 @@ class GitNestApp:
                 names=[p.name.casefold() for p in self.local_files]
                 if len(names)!=len(set(names)):
                     raise ValueError("所选文件中存在同名图片。请分批选择，或改为选择目录以保留子目录结构")
-            self.upload_button.disabled=True
-            self.folder_upload_button.disabled=True
-            self.upload_progress.visible=True
-            self.upload_progress.value=None
-            self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
-            self.upload_details.value=""
-            self.upload_details.visible=False
-            self.retry_failed_button.visible=False
-            self.upload_queue_rows=[{"path":str(p),"state":"queued","message":"等待上传"} for p in self.local_files]
-            self.refresh_upload_queue()
-            self.confirm_overwrite.visible=self.conflict.value=="overwrite"
-            self.page.update()
-            root=self.local_root if self.local_mode=="folder" else None
-            loop=asyncio.get_running_loop()
-            def progress_callback(index,total,path,state,message):
-                loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state,message)
-            results=await self.run_background(
-                upload_paths,repo,self.token_for(repo),self.local_files,
-                self.conflict.value,self.commit_message.value or "GitNest image upload",
-                self.remote_subpath.value or "",root,progress_callback=progress_callback
-            )
-            if results is None:return
-            counts={"uploaded":0,"skipped":0,"failed":0}
-            for index,(path,state,msg) in enumerate(results):
-                counts[state]=counts.get(state,0)+1
-                if index < len(self.upload_queue_rows):
-                    self.upload_queue_rows[index].update({"state":state,"message":msg})
-                add_log(repo["id"],"upload",path,state,msg)
-            self.refresh_upload_queue()
-            self.retry_failed_button.visible=counts["failed"]>0
-            self.confirm_overwrite.value=False
-            self.status.value=f"上传结束：成功 {counts['uploaded']} · 跳过 {counts['skipped']} · 失败 {counts['failed']}"
-            detail_lines=[]
-            for path,state,msg in results:
-                if state != "uploaded":
-                    label = "跳过" if state == "skipped" else "失败"
-                    detail_lines.append(f"[{label}] {path}\n  {msg}")
-            if detail_lines:
-                self.upload_details.value="上传明细：\n" + "\n".join(detail_lines[:30])
-                self.upload_details.visible=True
-                if len(detail_lines)>30:
-                    self.upload_details.value += f"\n……另有 {len(detail_lines)-30} 条未展开"
-            elif counts["uploaded"]:
-                self.upload_details.value="所有文件均已提交到远程仓库。可点击“读取远程图片”核对。"
-                self.upload_details.visible=True
-            else:
-                self.upload_details.value="没有文件成功上传，请检查仓库配置、Token、分支和网络。"
-                self.upload_details.visible=True
-            self.upload_progress.value=1
-            if counts["uploaded"]:
-                self.remote_items=[]
-                self.remote_cache={}
-                self.gallery.controls.clear()
-                self.gallery.visible=False
+            payload={
+                "repository_id":repo["id"],
+                "paths":[str(p) for p in self.local_files],
+                "relative_to":str(self.local_root) if self.local_mode=="folder" and self.local_root else None,
+                "conflict":self.conflict.value,
+                "commit_message":self.commit_message.value or "GitNest image upload",
+                "remote_subpath":self.remote_subpath.value or "",
+                "completed":{}
+            }
+            task_id=create_upload_task(repo["id"],payload)
+            self.active_task_id=task_id
+            await self.execute_upload_task(task_id,payload,repo)
+
         except Exception as ex:
             self.status.value=f"上传失败：{ex}"
+            self.page.update()
+
+    async def execute_upload_task(self,task_id,payload,repo):
+        if self.active_upload_control is not None:
+            self.status.value="当前已有上传任务正在运行，请先完成或取消当前任务"
+            self.page.update()
+            return
+        paths=[Path(p) for p in payload.get("paths",[])]
+        completed=payload.setdefault("completed",{})
+        remaining=[p for p in paths if completed.get(str(p),{}).get("state") not in {"uploaded","skipped"}]
+        if not remaining:
+            update_upload_task(task_id,payload=payload,status="completed",summary="所有图片均已处理")
+            self.refresh_saved_tasks()
+            self.status.value="任务已完成，没有待上传文件"
+            self.page.update()
+            return
+        self.active_task_id=task_id
+        self.active_task_payload=payload
+        self.active_upload_control=UploadControl()
+        self.upload_queue_rows=[
+            {"path":str(p),"state":completed.get(str(p),{}).get("state","queued"),
+             "message":completed.get(str(p),{}).get("message","等待上传")} for p in paths
+        ]
+        self.upload_button.disabled=True
+        self.folder_upload_button.disabled=True
+        self.upload_progress.visible=True
+        self.upload_progress.value=0
+        self.retry_failed_button.visible=False
+        self.pause_upload_button.disabled=False
+        self.resume_upload_button.disabled=True
+        self.cancel_upload_button.disabled=False
+        self.status.value=f"任务 #{task_id} 正在上传，剩余 {len(remaining)} 张"
+        update_upload_task(task_id,payload=payload,status="running",summary=f"正在上传，剩余 {len(remaining)} 张")
+        self.refresh_upload_queue()
+        self.refresh_saved_tasks()
+        loop=asyncio.get_running_loop()
+        control=self.active_upload_control
+        def progress_callback(index,total,path,state,message):
+            if state in {"uploaded","skipped","failed"}:
+                completed[str(Path(path).resolve())]={"state":state,"message":message}
+                update_upload_task(task_id,payload=payload,summary=f"已处理 {len(completed)} 项")
+            loop.call_soon_threadsafe(self.update_upload_progress,index,total,path,state,message)
+        try:
+            results=await self.run_background(
+                upload_paths,repo,self.token_for(repo),remaining,
+                payload.get("conflict","skip"),payload.get("commit_message","GitNest image upload"),
+                payload.get("remote_subpath",""),payload.get("relative_to"),
+                progress_callback=progress_callback,control=control
+            )
+            if results is None:
+                update_upload_task(task_id,payload=payload,status="failed",summary="上传执行异常，请检查日志")
+                return
+            for path,state,msg in results:
+                key=str(Path(path).resolve()) if Path(path).is_absolute() else str(Path(path).resolve())
+                completed[key]={"state":state,"message":msg}
+                add_log(repo["id"],"upload",path,state,msg)
+            cancelled=control.cancelled
+            paused=control.paused and not cancelled
+            failed=sum(1 for value in completed.values() if value.get("state")=="failed")
+            pending=[p for p in paths if completed.get(str(p.resolve()),{}).get("state") not in {"uploaded","skipped"}]
+            if cancelled:
+                status="cancelled";summary="用户取消任务"
+            elif paused:
+                status="paused";summary=f"已暂停，剩余 {len(pending)} 张"
+            elif pending:
+                status="failed";summary=f"有 {len(pending)} 张未成功处理，其中失败 {failed} 张；可继续重试"
+            else:
+                status="completed";summary="全部图片已处理"
+            update_upload_task(task_id,payload=payload,status=status,summary=summary)
+            self.status.value=f"任务 #{task_id}：{summary}"
+            self.upload_details.value=summary
+            self.upload_details.visible=True
+            self.retry_failed_button.visible=status=="failed"
+            self.confirm_overwrite.value=False
+            self.upload_progress.value=1 if status=="completed" else 0
+            if any(value.get("state")=="uploaded" for value in completed.values()):
+                self.remote_items=[];self.remote_cache={};self.gallery.controls.clear();self.gallery.visible=False
         finally:
+            self.active_upload_control=None
+            self.active_task_payload=None
+            self.active_task_id=None
+            self.pause_upload_button.disabled=True
+            self.resume_upload_button.disabled=True
+            self.cancel_upload_button.disabled=True
             self.upload_progress.visible=False
             self.upload_button.disabled=not self.local_files
             self.folder_upload_button.disabled=not (self.local_mode=="folder" and bool(self.local_files))
+            self.refresh_upload_queue()
+            self.refresh_saved_tasks()
             self.page.update()
+
+    def pause_upload(self,e=None):
+        if self.active_upload_control is None:return
+        self.active_upload_control.pause()
+        self.pause_upload_button.disabled=True
+        self.resume_upload_button.disabled=False
+        self.status.value="正在完成当前图片，随后暂停……"
+        self.page.update()
+
+    def resume_upload(self,e=None):
+        if self.active_upload_control is None:return
+        self.active_upload_control.resume()
+        self.pause_upload_button.disabled=False
+        self.resume_upload_button.disabled=True
+        self.status.value="继续上传中……"
+        self.page.update()
+
+    def cancel_upload(self,e=None):
+        if self.active_upload_control is None:return
+        self.active_upload_control.cancel()
+        self.pause_upload_button.disabled=True
+        self.resume_upload_button.disabled=True
+        self.cancel_upload_button.disabled=True
+        self.status.value="正在停止任务（当前正在进行的单张图片请求结束后生效）……"
+        self.page.update()
+
+    def refresh_saved_tasks(self):
+        if not hasattr(self,"saved_tasks"):return
+        self.saved_tasks.controls=[]
+        rows=upload_task_rows(30)
+        for task in rows:
+            state=task["status"]
+            can_resume=state in {"paused","failed","queued"}
+            self.saved_tasks.controls.append(ft.Container(padding=8,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
+                border_radius=8,content=ft.Row([
+                    ft.Column([ft.Text(f"任务 #{task['id']} · {state}",weight=ft.FontWeight.BOLD),
+                               ft.Text(task["summary"],size=11,color=ft.Colors.GREY_600),
+                               ft.Text(task["created_at"],size=10,color=ft.Colors.GREY_500)],expand=True),
+                    ft.OutlinedButton("继续 / 重试",disabled=not can_resume or self.active_upload_control is not None,
+                        on_click=lambda e,tid=task["id"]:self.resume_saved_task(tid))
+                ])))
+        if not rows:
+            self.saved_tasks.controls=[ft.Text("暂无历史上传任务",size=12,color=ft.Colors.GREY_500)]
+        if self.page:self.page.update()
+
+    async def resume_saved_task(self,task_id):
+        if self.active_upload_control is not None:
+            self.status.value="请先暂停或结束当前任务"
+            self.page.update()
+            return
+        task=get_upload_task(task_id)
+        if not task:
+            self.status.value="找不到该上传任务"
+            self.page.update()
+            return
+        repo=next((r for r in repositories() if r["id"]==task["repository_id"]),None)
+        if not repo:
+            self.status.value="原仓库配置已删除，无法恢复该任务"
+            self.page.update()
+            return
+        payload=task["payload"]
+        missing=[p for p in payload.get("paths",[]) if not Path(p).is_file()]
+        if missing:
+            self.status.value=f"有 {len(missing)} 个原文件已不存在，请恢复原文件后再继续"
+            self.page.update()
+            return
+        await self.execute_upload_task(task_id,payload,repo)
 
     async def pick_folder(self,e):
         try:
