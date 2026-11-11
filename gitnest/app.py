@@ -25,13 +25,13 @@ class GitNestApp:
         self.page.services.append(self.file_picker)
         self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260)
         self.upload_progress=ft.ProgressBar(value=0, width=320, visible=False)
-        self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700)
+        self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700, visible=False)
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
-        self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10)
+        self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
         self.local_folder=ft.TextField(label="本地图片目录", expand=True)
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
-        self.gallery=ft.GridView(expand=False, height=360, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12)
+        self.gallery=ft.GridView(expand=False, height=320, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12, visible=False)
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
         self.history=self.build_history()
@@ -68,8 +68,8 @@ class GitNestApp:
         self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,options=[
             ft.DropdownOption("skip","跳过已存在文件"),ft.DropdownOption("overwrite","覆盖远程文件"),
             ft.DropdownOption("rename","自动重命名")])
-        self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",expand=True)
-        self.confirm_overwrite=ft.Checkbox(label="我确认覆盖远程同路径图片",value=False)
+        self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",width=280)
+        self.confirm_overwrite=ft.Checkbox(label="我确认覆盖远程同路径图片",value=False,visible=False)
         self.preview_text=ft.Text(selectable=True)
         self.status=ft.Text("选择仓库和本地图片，即可开始管理",color=ft.Colors.GREY_600)
         self.upload_button=ft.Button("上传所选图片",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_selected,disabled=True)
@@ -114,12 +114,11 @@ class GitNestApp:
                 ft.IconButton(ft.Icons.REFRESH,tooltip="刷新仓库列表",on_click=self.refresh_repositories)
             ],vertical_alignment=ft.CrossAxisAlignment.CENTER),
             self.local_section,
-            ft.Container(padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                content=ft.Column(spacing=12,controls=[
+            ft.Container(padding=ft.Padding.symmetric(vertical=10,horizontal=14),border_radius=12,
+                content=ft.Column(spacing=8,controls=[
                     ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD),
-                    ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True),
+                    ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True,spacing=10),
                     self.confirm_overwrite,
-                    ft.Text("选择完成后，请在上方本地图片区域点击上传按钮。",size=12,color=ft.Colors.GREY_600),
                     self.status,
                     self.upload_details
                 ])),
@@ -235,6 +234,7 @@ class GitNestApp:
             if path.is_file() and path not in seen:
                 unique.append(path);seen.add(path)
         self.local_files=unique
+        self.local_gallery.visible=bool(unique)
         self.local_gallery.controls=[]
         self.upload_button.disabled=not unique
         self.folder_upload_button.disabled=not (self.local_mode=="folder" and unique)
@@ -294,6 +294,7 @@ class GitNestApp:
 
     def clear_local_selection(self,e=None):
         self.local_files=[]
+        self.local_gallery.visible=False
         self.local_mode="files"
         self.local_root=None
         self.local_folder.value=""
@@ -322,6 +323,8 @@ class GitNestApp:
             self.upload_progress.value=None
             self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
             self.upload_details.value=""
+            self.upload_details.visible=False
+            self.confirm_overwrite.visible=self.conflict.value=="overwrite"
             self.page.update()
             root=self.local_root if self.local_mode=="folder" else None
             loop=asyncio.get_running_loop()
@@ -350,8 +353,10 @@ class GitNestApp:
                     self.upload_details.value += f"\n……另有 {len(detail_lines)-30} 条未展开"
             elif counts["uploaded"]:
                 self.upload_details.value="所有文件均已提交到远程仓库。可点击“读取远程图片”核对。"
+                self.upload_details.visible=True
             else:
                 self.upload_details.value="没有文件成功上传，请检查仓库配置、Token、分支和网络。"
+                self.upload_details.visible=True
             self.upload_progress.value=1
             if counts["uploaded"]:
                 self.remote_items=[]
@@ -400,10 +405,12 @@ class GitNestApp:
             repo=self.current_repo();items=await self.run_background(remote_images,repo,self.token_for(repo))
             if items is None:return
             self.remote_items=items;self.gallery.controls=[]
+            self.gallery.visible=bool(items)
             self.status.value=f"已读取 {len(items)} 张图片，正在生成缩略图……"; self.page.update()
             cached=await self.run_background(cache_remote_thumbnails,repo,self.token_for(repo),items,str(CACHE_DIR))
             if cached is None:return
             self.gallery.controls=[]
+            self.gallery.visible=bool(items)
             for item in items:
                 entry=cached.get(item.path,{})
                 image_control=(ft.Image(src=entry["thumbnail"],width=180,height=120,fit=ft.BoxFit.CONTAIN)
