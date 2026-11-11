@@ -89,3 +89,49 @@ def test_upload_paths_rejects_unsafe_remote_subfolder(tmp_path, monkeypatch):
         services.upload_paths(
             {"base_path": "images"}, "token", [image], remote_subpath="../escape"
         )
+
+
+
+def test_upload_paths_runs_multiple_workers_and_preserves_result_order(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    active = 0
+    peak = 0
+    state_lock = threading.Lock()
+    writes = []
+
+    class ConcurrentFakeProvider:
+        def get_file(self, path):
+            nonlocal active, peak
+            with state_lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.08)
+            with state_lock:
+                active -= 1
+            raise ProviderError("not found", 404)
+
+        def put_file(self, path, content, message, sha=None):
+            with state_lock:
+                writes.append(path)
+            return {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(services, "with_provider", lambda *_: ConcurrentFakeProvider())
+    files = []
+    for name in ("a.jpg", "b.jpg", "c.jpg", "d.jpg"):
+        path = tmp_path / name
+        path.write_bytes(b"image")
+        files.append(path)
+
+    results = services.upload_paths(
+        {"base_path": "images"}, "token", files, max_workers=3
+    )
+
+    assert [Path(row[0]).name for row in results] == ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+    assert all(row[1] == "uploaded" for row in results)
+    assert peak >= 2
+    assert len(writes) == 4
