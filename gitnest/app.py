@@ -25,6 +25,7 @@ class GitNestApp:
         self.page.services.append(self.file_picker)
         self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260)
         self.upload_progress=ft.ProgressBar(value=0, width=320, visible=False)
+        self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700)
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
         self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10)
         self.local_folder=ft.TextField(label="本地图片目录", expand=True)
@@ -119,7 +120,8 @@ class GitNestApp:
                     ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True),
                     self.confirm_overwrite,
                     ft.Text("选择完成后，请在上方本地图片区域点击上传按钮。",size=12,color=ft.Colors.GREY_600),
-                    self.status
+                    self.status,
+                    self.upload_details
                 ])),
             self.remote_section,
             ft.Container(padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
@@ -254,7 +256,7 @@ class GitNestApp:
                     padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
                     content=ft.Column(spacing=6,controls=[
                         ft.Container(height=112,alignment=ft.Alignment.CENTER,
-                            content=ft.Image(src=str(thumbnail),width=160,height=108,fit=ft.ImageFit.CONTAIN)),
+                            content=ft.Image(src=thumbnail.read_bytes(),width=160,height=108,fit=ft.BoxFit.CONTAIN)),
                         ft.Text(path.name,size=12,weight=ft.FontWeight.BOLD,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
                         ft.Text(f"{path.stat().st_size:,} bytes",size=10,color=ft.Colors.GREY_600),
                         ft.Row([ft.IconButton(ft.Icons.CLOSE,tooltip="从上传列表移除",
@@ -297,6 +299,7 @@ class GitNestApp:
         self.local_folder.value=""
         self.local_gallery.controls.clear()
         self.local_summary.value="尚未选择图片"
+        self.upload_details.value=""
         self.upload_button.disabled=True
         self.folder_upload_button.disabled=True
         self.status.value="已清空本地图片选择"
@@ -318,6 +321,7 @@ class GitNestApp:
             self.upload_progress.visible=True
             self.upload_progress.value=None
             self.status.value=f"正在上传 {len(self.local_files)} 张图片，请勿关闭程序……"
+            self.upload_details.value=""
             self.page.update()
             root=self.local_root if self.local_mode=="folder" else None
             loop=asyncio.get_running_loop()
@@ -334,7 +338,20 @@ class GitNestApp:
                 counts[state]=counts.get(state,0)+1
                 add_log(repo["id"],"upload",path,state,msg)
             self.confirm_overwrite.value=False
-            self.status.value=f"上传完成：成功 {counts['uploaded']} · 跳过 {counts['skipped']} · 失败 {counts['failed']}"
+            self.status.value=f"上传结束：成功 {counts['uploaded']} · 跳过 {counts['skipped']} · 失败 {counts['failed']}"
+            detail_lines=[]
+            for path,state,msg in results:
+                if state != "uploaded":
+                    label = "跳过" if state == "skipped" else "失败"
+                    detail_lines.append(f"[{label}] {path}\\n  {msg}")
+            if detail_lines:
+                self.upload_details.value="上传明细：\\n" + "\\n".join(detail_lines[:30])
+                if len(detail_lines)>30:
+                    self.upload_details.value += f"\\n……另有 {len(detail_lines)-30} 条未展开"
+            elif counts["uploaded"]:
+                self.upload_details.value="所有文件均已提交到远程仓库。可点击“读取远程图片”核对。"
+            else:
+                self.upload_details.value="没有文件成功上传，请检查仓库配置、Token、分支和网络。"
             self.upload_progress.value=1
             if counts["uploaded"]:
                 self.remote_items=[]
@@ -389,7 +406,7 @@ class GitNestApp:
             self.gallery.controls=[]
             for item in items:
                 entry=cached.get(item.path,{})
-                image_control=(ft.Image(src=entry["thumbnail"],width=180,height=120,fit=ft.ImageFit.CONTAIN)
+                image_control=(ft.Image(src=entry["thumbnail"],width=180,height=120,fit=ft.BoxFit.CONTAIN)
                                if entry.get("thumbnail") else
                                ft.Container(height=120,alignment=ft.Alignment.CENTER,
                                    content=ft.Column([ft.Icon(ft.Icons.BROKEN_IMAGE,size=36),
