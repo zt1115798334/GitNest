@@ -30,7 +30,23 @@ class GitNestApp:
         self.upload_progress=ft.ProgressBar(value=0, width=320, visible=False)
         self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700, visible=False)
         self.upload_queue_rows=[]
-        self.queue_display=ft.Text(selectable=True,size=12,color=ft.Colors.GREY_700,visible=False)
+        self.queue_expanded=True
+        self.queue_summary=ft.Text("上传任务队列",size=13,weight=ft.FontWeight.BOLD,color="#344054")
+        self.queue_toggle=ft.IconButton(icon=ft.Icons.EXPAND_LESS,tooltip="收起上传任务队列",on_click=self.toggle_upload_queue)
+        self.queue_list=ft.Column(spacing=4,scroll=ft.ScrollMode.AUTO)
+        self.queue_body=ft.Container(
+            height=280,
+            padding=ft.Padding(10,6,10,6),
+            border=ft.Border.all(1,"#E7EBF2"),
+            border_radius=10,
+            bgcolor="#FAFBFD",
+            content=self.queue_list,
+            visible=True
+        )
+        self.queue_panel=ft.Column(spacing=6,controls=[
+            ft.Row([self.queue_summary,ft.Container(expand=True),self.queue_toggle]),
+            self.queue_body
+        ],visible=False)
         self.active_upload_control=None
         self.active_task_id=None
         self.active_task_payload=None
@@ -192,7 +208,7 @@ class GitNestApp:
                     ft.Row([self.remote_subpath,self.conflict,self.commit_message,self.upload_workers],wrap=True,spacing=10),
                     self.confirm_overwrite,
                     self.status,
-                    self.queue_display,
+                    self.queue_panel,
                     ft.Row([self.pause_upload_button,self.resume_upload_button,self.cancel_upload_button],wrap=True),
                     self.retry_failed_button,
                     self.upload_details,
@@ -744,17 +760,49 @@ class GitNestApp:
             self.gallery.controls.append(card)
         self.page.update()
 
+    def toggle_upload_queue(self,e=None):
+        self.queue_expanded=not self.queue_expanded
+        self.queue_body.visible=self.queue_expanded
+        self.queue_toggle.icon=ft.Icons.EXPAND_LESS if self.queue_expanded else ft.Icons.EXPAND_MORE
+        self.queue_toggle.tooltip="收起上传任务队列" if self.queue_expanded else "展开上传任务队列"
+        self.page.update()
+
     def refresh_upload_queue(self):
         labels={"queued":"排队中","uploading":"正在上传","uploaded":"成功","skipped":"已跳过","failed":"失败"}
-        lines=[]
+        colors={"queued":"#667085","uploading":"#2563EB","uploaded":"#15803D","skipped":"#B45309","failed":"#DC2626"}
+        counts={key:sum(1 for row in self.upload_queue_rows if row["state"]==key) for key in labels}
+        total=len(self.upload_queue_rows)
+        self.queue_summary.value=(
+            f"上传任务队列  ·  共 {total} 项  ·  "
+            f"排队 {counts['queued']}  ·  上传中 {counts['uploading']}  ·  "
+            f"成功 {counts['uploaded']}  ·  跳过 {counts['skipped']}  ·  失败 {counts['failed']}"
+        )
+        self.queue_list.controls=[]
         for row in self.upload_queue_rows:
+            state=row.get("state","queued")
             name=Path(row["path"]).name
-            lines.append(f"[{labels.get(row['state'],row['state'])}] {name}  {row.get('message','')}")
-        shown=lines[:30]
-        if len(lines)>30:
-            shown.append(f"……还有 {len(lines)-30} 个任务未展开")
-        self.queue_display.value="上传任务队列：\n"+"\n".join(shown) if shown else ""
-        self.queue_display.visible=bool(lines)
+            message=row.get("message","")
+            self.queue_list.controls.append(
+                ft.Container(
+                    padding=ft.Padding(8,5,8,5),
+                    border_radius=8,
+                    bgcolor="#FFFFFF",
+                    border=ft.Border.all(1,"#EEF1F5"),
+                    content=ft.Row([
+                        ft.Container(width=7,height=7,border_radius=4,bgcolor=colors.get(state,"#667085")),
+                        ft.Column([
+                            ft.Text(name,size=12,weight=ft.FontWeight.W_600,
+                                    max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
+                            ft.Text(f"{labels.get(state,state)} · {message}" if message else labels.get(state,state),
+                                    size=10,color=colors.get(state,"#667085"),
+                                    max_lines=2,overflow=ft.TextOverflow.ELLIPSIS)
+                        ],spacing=2,expand=True)
+                    ],spacing=8)
+                )
+            )
+        self.queue_panel.visible=bool(self.upload_queue_rows)
+        self.queue_body.visible=self.queue_expanded and bool(self.upload_queue_rows)
+        self.queue_toggle.icon=ft.Icons.EXPAND_LESS if self.queue_expanded else ft.Icons.EXPAND_MORE
         if self.page:
             self.page.update()
 
