@@ -65,7 +65,7 @@ class GitNestApp:
             self.repo_message,ft.Divider(),ft.Text("已配置仓库",size=18,weight=ft.FontWeight.BOLD),self.repo_cards])
 
     def build_workspace(self):
-        self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,options=[
+        self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,on_select=self.on_conflict_change,options=[
             ft.DropdownOption("skip","跳过已存在文件"),ft.DropdownOption("overwrite","覆盖远程文件"),
             ft.DropdownOption("rename","自动重命名")])
         self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",width=280)
@@ -114,7 +114,7 @@ class GitNestApp:
                 ft.IconButton(ft.Icons.REFRESH,tooltip="刷新仓库列表",on_click=self.refresh_repositories)
             ],vertical_alignment=ft.CrossAxisAlignment.CENTER),
             self.local_section,
-            ft.Container(padding=ft.Padding.symmetric(vertical=10,horizontal=14),border_radius=12,
+            ft.Container(padding=12,border_radius=12,
                 content=ft.Column(spacing=8,controls=[
                     ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD),
                     ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True,spacing=10),
@@ -131,6 +131,12 @@ class GitNestApp:
                     self.preview_text
                 ]))
         ])
+
+    def on_conflict_change(self,e):
+        self.confirm_overwrite.visible=self.conflict.value=="overwrite"
+        if not self.confirm_overwrite.visible:
+            self.confirm_overwrite.value=False
+        self.page.update()
 
     def build_history(self):
         self.history_rows=ft.Column(spacing=4)
