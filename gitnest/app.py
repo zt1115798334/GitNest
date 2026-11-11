@@ -5,7 +5,7 @@ import flet as ft
 from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs, create_upload_task, update_upload_task, upload_task_rows, get_upload_task
 from gitnest.security import save_token, get_token, delete_token
 from gitnest.services import test_repository, remote_images, download_one, download_all, upload_paths, compare_folders, cache_remote_thumbnails, UploadControl
-from gitnest.image_cache import save_remote_image
+from gitnest.image_cache import save_remote_image, create_local_thumbnail
 from gitnest.images import scan_images
 from gitnest.config import CACHE_DIR
 
@@ -51,7 +51,7 @@ class GitNestApp:
             on_select=self.filter_remote_gallery)
         self.remote_count=ft.Text(color=ft.Colors.GREY_600,size=12)
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
-        self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
+        self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)\n        self.local_load_more=ft.TextButton("加载更多",on_click=self.load_more_local_previews,visible=False)
         self.local_folder=ft.TextField(label="本地图片目录", expand=True)
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
@@ -323,54 +323,79 @@ class GitNestApp:
             path=Path(value).expanduser().resolve()
             if path.is_file() and path not in seen:
                 unique.append(path);seen.add(path)
+        self._local_preview_generation=getattr(self,"_local_preview_generation",0)+1
         self.local_files=unique
+        self._local_preview_errors=[]
+        self._local_preview_next=0
+        self._local_preview_page_size=100
         self.local_gallery.visible=bool(unique)
         self.local_gallery.controls=[]
         self.upload_button.disabled=not unique
         self.folder_upload_button.disabled=not (self.local_mode=="folder" and unique)
         self.local_summary.value=f"已选择 {len(unique)} 张图片"
+        self.local_load_more.visible=False
+        self.local_load_more.disabled=False
         self.page.update()
-        preview_errors=[]
-        for path in unique:
-            try:
-                content=await self.run_background(lambda p: p.read_bytes(),path)
-                if content is None:
-                    raise ValueError("读取文件失败，请检查文件是否仍存在或被其他程序占用")
-                cached=await self.run_background(
-                    save_remote_image,content,f"local/{path}",str(CACHE_DIR/"local")
-                )
-                if not cached:
-                    raise ValueError("缩略图生成失败，请检查图片格式或文件是否损坏")
-                _,thumbnail=cached
-                card=ft.Container(
-                    padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
-                    content=ft.Column(spacing=6,controls=[
-                        ft.Container(height=112,alignment=ft.Alignment.CENTER,
-                            content=ft.Image(src=thumbnail.read_bytes(),width=160,height=108,fit=ft.BoxFit.CONTAIN)),
-                        ft.Text(path.name,size=12,weight=ft.FontWeight.BOLD,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
-                        ft.Text(f"{path.stat().st_size:,} bytes",size=10,color=ft.Colors.GREY_600),
-                        ft.Row([ft.IconButton(ft.Icons.CLOSE,tooltip="从上传列表移除",
-                            on_click=lambda e,p=path:self.remove_local_file(p))],alignment=ft.MainAxisAlignment.END)
-                    ])
-                )
-            except Exception as exc:
-                preview_errors.append(f"{path.name}: {exc}")
-                card=ft.Container(
-                    padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
-                    content=ft.Column(spacing=6,controls=[
-                        ft.Container(height=112,alignment=ft.Alignment.CENTER,
-                            content=ft.Icon(ft.Icons.BROKEN_IMAGE,color=ft.Colors.RED,size=36)),
-                        ft.Text(path.name,size=12,weight=ft.FontWeight.BOLD,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
-                        ft.Text(f"预览失败：{exc}",size=10,color=ft.Colors.RED,max_lines=3),
-                        ft.IconButton(ft.Icons.CLOSE,tooltip="从上传列表移除",
-                            on_click=lambda e,p=path:self.remove_local_file(p))
-                    ])
-                )
-            self.local_gallery.controls.append(card)
+        await self.load_more_local_previews()
+
+    def build_local_preview_card(self,path,thumbnail=None,error=None):
+        if thumbnail:
+            preview=ft.Image(src=str(thumbnail),width=160,height=108,fit=ft.BoxFit.CONTAIN)
+        else:
+            preview=ft.Icon(ft.Icons.BROKEN_IMAGE,color=ft.Colors.RED,size=36)
+        details=(ft.Text(f"预览失败：{error}",size=10,color=ft.Colors.RED,max_lines=3)
+                 if error else ft.Text(f"{path.stat().st_size:,} bytes",size=10,color=ft.Colors.GREY_600))
+        return ft.Container(
+            padding=8,border_radius=12,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
+            content=ft.Column(spacing=6,controls=[
+                ft.Container(height=112,alignment=ft.Alignment.CENTER,content=preview),
+                ft.Text(path.name,size=12,weight=ft.FontWeight.BOLD,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS),
+                details,
+                ft.Row([ft.IconButton(ft.Icons.CLOSE,tooltip="从上传列表移除",
+                    on_click=lambda e,p=path:self.remove_local_file(p))],alignment=ft.MainAxisAlignment.END)
+            ])
+        )
+
+    async def load_more_local_previews(self,e=None):
+        generation=getattr(self,"_local_preview_generation",0)
+        start=self._local_preview_next
+        end=min(start+self._local_preview_page_size,len(self.local_files))
+        if start>=end:
+            self.local_load_more.visible=False
             self.page.update()
-        self.status.value=f"本地图片已加入队列：{len(self.local_files)} 张"
-        if preview_errors:
-            self.status.value+=f"；其中 {len(preview_errors)} 张预览失败，但仍可尝试上传"
+            return
+        self.local_load_more.disabled=True
+        self.status.value=f"正在生成预览：{start+1}-{end} / {len(self.local_files)}"
+        self.page.update()
+        semaphore=asyncio.Semaphore(6)
+        async def make_preview(path):
+            async with semaphore:
+                try:
+                    return await asyncio.to_thread(
+                        create_local_thumbnail,path,str(CACHE_DIR/"local")
+                    )
+                except Exception as exc:
+                    return exc
+        paths=self.local_files[start:end]
+        results=await asyncio.gather(*(make_preview(path) for path in paths))
+        if generation!=getattr(self,"_local_preview_generation",0):
+            return
+        for offset,(path,result) in enumerate(zip(paths,results),start=0):
+            if isinstance(result,Exception):
+                self._local_preview_errors.append(f"{path.name}: {result}")
+                card=self.build_local_preview_card(path,error=str(result))
+            else:
+                card=self.build_local_preview_card(path,thumbnail=result)
+            self.local_gallery.controls.append(card)
+            if (offset+1)%20==0:
+                self.page.update()
+        self._local_preview_next=end
+        self.local_load_more.visible=end<len(self.local_files)
+        self.local_load_more.disabled=False
+        self.local_load_more.text=f"加载更多（已显示 {end}/{len(self.local_files)}）" if end<len(self.local_files) else "已全部显示"
+        self.status.value=f"本地图片已加入队列：{len(self.local_files)} 张；已显示预览 {end} 张"
+        if self._local_preview_errors:
+            self.status.value+=f"；其中 {len(self._local_preview_errors)} 张预览失败，但仍可尝试上传"
         self.page.update()
 
     def remove_local_file(self,path):
