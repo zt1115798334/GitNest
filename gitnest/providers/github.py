@@ -98,7 +98,7 @@ class GitHubProvider(GitProvider):
         data = self._request(
             "GET",
             f"/repos/{quote(self.owner)}/{quote(self.repo)}/contents/{quote(path, safe='/')}",
-            params={"ref": self.branch},
+            params={"ref": self.branch} if self.branch else {},
         ).json()
         if data.get("encoding") == "base64" and data.get("content"):
             return base64.b64decode(data["content"]), data.get("sha")
