@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from threading import Lock
 import flet as ft
 from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs, create_upload_task, update_upload_task, upload_task_rows, get_upload_task
 from gitnest.security import save_token, get_token, delete_token
@@ -459,12 +460,20 @@ class GitNestApp:
         self.refresh_saved_tasks()
         loop=asyncio.get_running_loop()
         control=self.active_upload_control
+        progress_lock=Lock()
         def progress_callback(index,total,path,state,message):
-            if state in {"uploaded","skipped","failed"} and 0 < index <= len(remaining):
-                completed[str(remaining[index-1].resolve())]={"state":state,"message":message}
-                update_upload_task(task_id,payload=payload,summary=f"已处理 {len(completed)} 项")
-            overall_index=paths.index(remaining[index-1])+1 if 0 < index <= len(remaining) else index
-            loop.call_soon_threadsafe(self.update_upload_progress,overall_index,len(paths),path,state,message)
+            matched=next((item for item in remaining
+                if (item.relative_to(self.local_root).as_posix() if self.local_root and item.is_relative_to(self.local_root) else item.name)==path
+                or str(item)==path),None)
+            if matched is not None:
+                overall_index=paths.index(matched)+1
+                if state in {"uploaded","skipped","failed","queued"}:
+                    with progress_lock:
+                        completed[str(matched.resolve())]={"state":state,"message":message}
+                        update_upload_task(task_id,payload=payload,summary=f"已处理 {sum(1 for v in completed.values() if v.get('state') in {'uploaded','skipped','failed'})} 项")
+                loop.call_soon_threadsafe(self.update_upload_progress,overall_index,len(paths),str(matched),state,message)
+            else:
+                loop.call_soon_threadsafe(self.update_upload_progress,index,len(paths),path,state,message)
         try:
             results=await self.run_background(
                 upload_paths,repo,self.token_for(repo),remaining,
@@ -588,6 +597,7 @@ class GitNestApp:
         self.conflict.value=payload.get("conflict","skip")
         self.remote_subpath.value=payload.get("remote_subpath","")
         self.commit_message.value=payload.get("commit_message","GitNest image upload")
+        self.upload_workers.value=str(payload.get("max_workers",3))
         self.local_summary.value=f"恢复任务 #{task_id}：{len(self.local_files)} 张图片"
         missing=[p for p in payload.get("paths",[]) if not Path(p).is_file()]
         if missing:
