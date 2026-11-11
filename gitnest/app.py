@@ -343,11 +343,11 @@ class GitNestApp:
             for path,state,msg in results:
                 if state != "uploaded":
                     label = "跳过" if state == "skipped" else "失败"
-                    detail_lines.append(f"[{label}] {path}\\n  {msg}")
+                    detail_lines.append(f"[{label}] {path}\n  {msg}")
             if detail_lines:
-                self.upload_details.value="上传明细：\\n" + "\\n".join(detail_lines[:30])
+                self.upload_details.value="上传明细：\n" + "\n".join(detail_lines[:30])
                 if len(detail_lines)>30:
-                    self.upload_details.value += f"\\n……另有 {len(detail_lines)-30} 条未展开"
+                    self.upload_details.value += f"\n……另有 {len(detail_lines)-30} 条未展开"
             elif counts["uploaded"]:
                 self.upload_details.value="所有文件均已提交到远程仓库。可点击“读取远程图片”核对。"
             else:
@@ -429,7 +429,7 @@ class GitNestApp:
             cached=await self.run_background(cache_remote_thumbnails,repo,self.token_for(repo),[item],str(CACHE_DIR))
             entry=(cached or {}).get(item.path,{})
             if entry.get("original"):
-                self.page.show_dialog(ft.AlertDialog(title=ft.Text(item.name),content=ft.Image(src=entry["original"],width=620,height=480,fit=ft.ImageFit.CONTAIN),actions=[ft.TextButton("关闭",on_click=lambda e:self.page.pop_dialog())]))
+                self.page.show_dialog(ft.AlertDialog(title=ft.Text(item.name),content=ft.Image(src=entry["original"],width=620,height=480,fit=ft.BoxFit.CONTAIN),actions=[ft.TextButton("关闭",on_click=lambda e:self.page.pop_dialog())]))
             else:
                 raise ValueError(entry.get("error") or "图片缓存失败")
         except Exception as ex:self.status.value=f"预览失败：{ex}";self.page.update()
