@@ -29,6 +29,7 @@ If PowerShell blocks activation, run \`.venv\Scripts\activate.bat\` from CMD ins
 - A redesigned image workspace with multi-select local image picking, recursive folder scanning, local thumbnail previews, per-file removal, and clear upload settings.
 - Per-file upload task queue with queued / uploading / uploaded / skipped / failed states, progress reporting, and retry for failed local files.
 - Remote image gallery search by filename or repository path, file-type filtering, and sorting by name or file size.
+- Persistent upload tasks stored in SQLite, with cooperative pause/resume/cancel controls, per-file progress, retry of failed items, and recovery of interrupted tasks after restart.
 - Batch uploads with create/update detection, per-file progress, success/skip/failure summaries, custom remote subfolders, and commit messages.
 - Batch downloads that preserve paths relative to the configured remote image directory.
 - Two-way comparison by actual file-content SHA-256. Same-path files report both hashes and byte sizes; local-only, remote-only, identical, different and read-error states are distinguished.
