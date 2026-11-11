@@ -69,7 +69,7 @@ class GitNestApp:
                 ft.NavigationRailDestination(icon=ft.Icons.SETTINGS_OUTLINED,selected_icon=ft.Icons.SETTINGS,label="仓库配置"),
                 ft.NavigationRailDestination(icon=ft.Icons.HISTORY_OUTLINED,selected_icon=ft.Icons.HISTORY,label="操作记录")],
             on_change=self.navigate)
-        sidebar=ft.Container(width=184,expand=True,bgcolor="#FFFFFF",padding=ft.Padding(12,22,12,16),
+        sidebar=ft.Container(width=184,bgcolor="#FFFFFF",padding=ft.Padding(12,22,12,16),
             content=ft.Column(expand=True,spacing=18,controls=[
                 ft.Container(padding=ft.Padding(12,8,8,18),content=ft.Row(spacing=10,controls=[
                     ft.Container(width=34,height=34,border_radius=11,bgcolor="#EAF0FF",
