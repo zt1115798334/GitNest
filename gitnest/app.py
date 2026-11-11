@@ -427,14 +427,14 @@ class GitNestApp:
             paused=control.paused and not cancelled
             failed=sum(1 for value in completed.values() if value.get("state")=="failed")
             pending=[p for p in paths if completed.get(str(p.resolve()),{}).get("state") not in {"uploaded","skipped"}]
-            if cancelled:
-                status="cancelled";summary="用户取消任务"
+            if not pending:
+                status="completed";summary="全部图片已处理"
+            elif cancelled:
+                status="cancelled";summary=f"用户取消任务，仍有 {len(pending)} 张未处理"
             elif paused:
                 status="paused";summary=f"已暂停，剩余 {len(pending)} 张"
-            elif pending:
-                status="failed";summary=f"有 {len(pending)} 张未成功处理，其中失败 {failed} 张；可继续重试"
             else:
-                status="completed";summary="全部图片已处理"
+                status="failed";summary=f"有 {len(pending)} 张未成功处理，其中失败 {failed} 张；可继续重试"
             update_upload_task(task_id,payload=payload,status=status,summary=summary)
             self.status.value=f"任务 #{task_id}：{summary}"
             self.upload_details.value=summary
@@ -444,6 +444,9 @@ class GitNestApp:
             self.upload_progress.value=1 if status=="completed" else 0
             if any(value.get("state")=="uploaded" for value in completed.values()):
                 self.remote_items=[];self.remote_cache={};self.gallery.controls.clear();self.gallery.visible=False
+        except Exception as ex:
+            update_upload_task(task_id,payload=payload,status="failed",summary=f"任务异常：{ex}")
+            self.status.value=f"任务 #{task_id} 执行失败：{ex}"
         finally:
             self.active_upload_control=None
             self.active_task_payload=None
