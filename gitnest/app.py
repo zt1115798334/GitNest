@@ -12,10 +12,12 @@ class GitNestApp:
     def __init__(self, page: ft.Page):
         self.page=page
         self.page.title="GitNest"
-        self.page.padding=20
-        self.page.window.width=1220
-        self.page.window.height=850
-        self.page.theme_mode=ft.ThemeMode.SYSTEM
+        self.page.padding=0
+        self.page.window.width=1360
+        self.page.window.height=900
+        self.page.theme_mode=ft.ThemeMode.LIGHT
+        self.page.bgcolor="#F4F6FA"
+        self.page.theme=ft.Theme(color_scheme_seed="#3765E8",use_material3=True)
         self.selected_repo_id=None
         self.remote_items=[]
         self.local_files=[]
@@ -56,13 +58,37 @@ class GitNestApp:
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
         self.history=self.build_history()
-        self.body=ft.Container(expand=True, content=self.workspace)
-        self.navigation=ft.NavigationRail(selected_index=0, label_type=ft.NavigationRailLabelType.ALL,
-            destinations=[ft.NavigationRailDestination(icon=ft.Icons.GRID_VIEW,label="图片工作台"),
-                          ft.NavigationRailDestination(icon=ft.Icons.SETTINGS,label="仓库配置"),
-                          ft.NavigationRailDestination(icon=ft.Icons.HISTORY,label="操作记录")],
+        self.body=ft.Container(expand=True,padding=28,bgcolor="#F4F6FA",content=self.workspace)
+        self.navigation=ft.NavigationRail(selected_index=0,label_type=ft.NavigationRailLabelType.ALL,
+            min_width=156,group_alignment=-0.9,bgcolor="#FFFFFF",
+            indicator_color="#EAF0FF",use_indicator=True,
+            selected_label_text_style=ft.TextStyle(color="#315DDB",weight=ft.FontWeight.W_600,size=12),
+            unselected_label_text_style=ft.TextStyle(color="#778196",size=12),
+            destinations=[
+                ft.NavigationRailDestination(icon=ft.Icons.GRID_VIEW_OUTLINED,selected_icon=ft.Icons.GRID_VIEW,label="图片工作台"),
+                ft.NavigationRailDestination(icon=ft.Icons.SETTINGS_OUTLINED,selected_icon=ft.Icons.SETTINGS,label="仓库配置"),
+                ft.NavigationRailDestination(icon=ft.Icons.HISTORY_OUTLINED,selected_icon=ft.Icons.HISTORY,label="操作记录")],
             on_change=self.navigate)
-        self.page.add(ft.Row([self.navigation,ft.VerticalDivider(width=1),self.body],expand=True))
+        sidebar=ft.Container(width=184,bgcolor="#FFFFFF",padding=ft.Padding(12,22,12,16),
+            content=ft.Column(spacing=18,controls=[
+                ft.Container(padding=ft.Padding(12,8,8,18),content=ft.Row(spacing=10,controls=[
+                    ft.Container(width=34,height=34,border_radius=11,bgcolor="#EAF0FF",
+                        alignment=ft.Alignment.CENTER,content=ft.Icon(ft.Icons.PHOTO_LIBRARY_ROUNDED,color="#315DDB",size=20)),
+                    ft.Column(spacing=0,controls=[
+                        ft.Text("GitNest",size=19,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                        ft.Text("IMAGE WORKSPACE",size=9,weight=ft.FontWeight.W_600,color="#8993A5")
+                    ])
+                ])),
+                ft.Text("工作空间",size=10,weight=ft.FontWeight.BOLD,color="#9AA3B2"),
+                self.navigation,
+                ft.Container(expand=True),
+                ft.Divider(color="#EDF0F5"),
+                ft.Container(padding=10,content=ft.Column(spacing=3,controls=[
+                    ft.Text("GitNest Desktop",size=11,weight=ft.FontWeight.W_600,color="#566174"),
+                    ft.Text("图片仓库管理工具",size=10,color="#9AA3B2")
+                ]))
+            ]))
+        self.page.add(ft.Row([sidebar,ft.VerticalDivider(width=1,color="#E9EDF3"),self.body],spacing=0,expand=True))
         self.refresh_repositories()
         self.refresh_saved_tasks()
 
@@ -76,15 +102,26 @@ class GitNestApp:
         self.token=ft.TextField(label="访问令牌（不会保存到普通配置文件）",password=True,can_reveal_password=True,expand=True)
         self.repo_message=ft.Text()
         self.repo_cards=ft.Column(spacing=8)
-        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,controls=[
-            ft.Text("仓库配置",size=26,weight=ft.FontWeight.BOLD),
-            ft.Text("使用访问令牌，不要填写 GitHub / Gitee 登录密码。令牌通过系统凭据库保存。",color=ft.Colors.GREY_600),
+        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=16,controls=[
+            ft.Column(spacing=5,controls=[
+                ft.Text("仓库配置",size=30,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                ft.Text("管理 GitHub 与 Gitee 仓库连接，访问令牌安全保存在系统凭据库。",size=12,color="#7A8495")
+            ]),
+            ft.Container(padding=22,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+                content=ft.Column(spacing=14,controls=[
             ft.Row([self.platform,self.owner,self.repo,self.branch],wrap=True),
             ft.Row([self.repo_name,self.base_path],wrap=True),self.token,
             ft.Row([ft.Button("保存仓库",icon=ft.Icons.SAVE,on_click=self.save_repo),
                     ft.OutlinedButton("测试连接",icon=ft.Icons.LINK,on_click=self.test_repo),
                     ft.OutlinedButton("清空",on_click=self.clear_repo_form)],wrap=True),
-            self.repo_message,ft.Divider(),ft.Text("已配置仓库",size=18,weight=ft.FontWeight.BOLD),self.repo_cards])
+            self.repo_message
+                ])),
+            ft.Container(padding=22,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+                content=ft.Column(spacing=12,controls=[
+                    ft.Text("已配置仓库",size=18,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                    self.repo_cards
+                ]))
+        ])
 
     def build_workspace(self):
         self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,on_select=self.on_conflict_change,options=[
@@ -97,7 +134,7 @@ class GitNestApp:
         self.upload_button=ft.Button("上传所选图片",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_selected,disabled=True)
         self.folder_upload_button=ft.OutlinedButton("上传整个目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.upload_local,disabled=True)
         self.local_section=ft.Container(
-            padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
             content=ft.Column(spacing=12,controls=[
                 ft.Row([ft.Column([
                     ft.Text("本地图片",size=18,weight=ft.FontWeight.BOLD),
@@ -116,7 +153,7 @@ class GitNestApp:
             ])
         )
         self.remote_section=ft.Container(
-            padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
             content=ft.Column(spacing=10,controls=[
                 ft.Row([ft.Column([
                     ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
@@ -130,16 +167,18 @@ class GitNestApp:
         return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=16,controls=[
             ft.Row([
                 ft.Column([
-                    ft.Text("图片工作台",size=28,weight=ft.FontWeight.BOLD),
-                    ft.Text("本地图片与 GitHub / Gitee 仓库之间的上传、下载和同步。",color=ft.Colors.GREY_600)
-                ],expand=True),
+                    ft.Text("图片工作台",size=30,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                    ft.Text("管理本地图片与 GitHub / Gitee 仓库之间的上传、下载和同步。",size=12,color="#7A8495")
+                ],expand=True,spacing=5),
                 self.repo_dropdown,
                 ft.IconButton(ft.Icons.REFRESH,tooltip="刷新仓库列表",on_click=self.refresh_repositories)
             ],vertical_alignment=ft.CrossAxisAlignment.CENTER),
             self.local_section,
-            ft.Container(padding=12,border_radius=12,
-                content=ft.Column(spacing=8,controls=[
-                    ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD),
+            ft.Container(padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+                content=ft.Column(spacing=12,controls=[
+                    ft.Row([ft.Column([ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                        ft.Text("设置远程目录、文件冲突规则和提交说明",size=11,color="#8993A5")],spacing=3),
+                        ft.Container(expand=True),ft.Icon(ft.Icons.TUNE_ROUNDED,color="#8B95A6")]),
                     ft.Row([self.remote_subpath,self.conflict,self.commit_message],wrap=True,spacing=10),
                     self.confirm_overwrite,
                     self.status,
@@ -147,12 +186,14 @@ class GitNestApp:
                     ft.Row([self.pause_upload_button,self.resume_upload_button,self.cancel_upload_button],wrap=True),
                     self.retry_failed_button,
                     self.upload_details,
-                    ft.Divider(),
-                    ft.Text("已保存的上传任务",size=14,weight=ft.FontWeight.BOLD),
-                    self.saved_tasks
+                    ft.Divider(color="#EDF0F5"),
+                    ft.Row([ft.Text("任务中心",size=14,weight=ft.FontWeight.BOLD,color="#344054"),
+                        ft.Container(expand=True),
+                        ft.Text("可暂停、恢复和重试",size=10,color="#8993A5")]),
+                    ft.Container(padding=12,border_radius=12,bgcolor="#F8FAFC",content=self.saved_tasks)
                 ])),
             self.remote_section,
-            ft.Container(padding=18,border_radius=16,bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+            ft.Container(padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
                 content=ft.Column(spacing=10,controls=[
                     ft.Text("同步差异",size=18,weight=ft.FontWeight.BOLD),
                     ft.Text("按文件内容 SHA-256 比较本地和远程图片，不会自动删除任何文件。",size=12,color=ft.Colors.GREY_600),
@@ -169,8 +210,13 @@ class GitNestApp:
 
     def build_history(self):
         self.history_rows=ft.Column(spacing=4)
-        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,controls=[ft.Text("操作记录",size=26,weight=ft.FontWeight.BOLD),
-            ft.OutlinedButton("刷新",icon=ft.Icons.REFRESH,on_click=self.refresh_history),self.history_rows])
+        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=16,controls=[
+            ft.Row([ft.Column([ft.Text("操作记录",size=30,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                ft.Text("查看图片上传、下载和仓库操作的执行结果。",size=12,color="#7A8495")],spacing=5),
+                ft.Container(expand=True),ft.OutlinedButton("刷新记录",icon=ft.Icons.REFRESH,on_click=self.refresh_history)]),
+            ft.Container(padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+                content=self.history_rows)
+        ])
 
     def navigate(self,e):
         index=e.control.selected_index
