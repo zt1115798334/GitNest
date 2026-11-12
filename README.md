@@ -116,7 +116,7 @@ python -m compileall -q .
 
 ## Desktop experience improvements
 
-- Remembers non-secret workspace preferences such as local upload folder, download folder, upload/download conflict policies, worker counts, remote subdirectory, and commit message in the local SQLite database.
+- Remembers non-secret workspace preferences such as download folder, upload/download conflict policies, worker counts, remote subdirectory, and commit message in the local SQLite database.
 - Shows clear empty states for local and remote image galleries, including when filters return no results.
 - Displays task states in Chinese for easier scanning.
 - Requires explicit confirmation before deleting a repository configuration; its credential is deleted while historical task and operation records remain.
