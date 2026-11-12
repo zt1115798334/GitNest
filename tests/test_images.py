@@ -14,3 +14,19 @@ def test_safe_local_destination_stays_inside_root(tmp_path):
 
 def test_sha256_is_stable():
     assert sha256_bytes(b"abc") == sha256_bytes(b"abc")
+
+
+def test_validate_image_checks_real_format_and_corruption():
+    from io import BytesIO
+    from PIL import Image
+    from gitnest.images import validate_image, ImageFileError
+
+    stream = BytesIO()
+    Image.new("RGB", (12, 8), "red").save(stream, format="PNG")
+    png = stream.getvalue()
+    validate_image(png, "photo.png")
+
+    with pytest.raises(ImageFileError, match="与文件扩展名"):
+        validate_image(png, "photo.jpg")
+    with pytest.raises(ImageFileError, match="损坏或格式无法识别"):
+        validate_image(b"not-an-image", "photo.png")
