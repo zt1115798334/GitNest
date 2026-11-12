@@ -85,11 +85,11 @@ class GitNestApp:
         # Use a wrapping Row instead of GridView: the native GridView viewport
         # can render as a large gray surface on some Windows/Flet builds.
         self.gallery=ft.Row(wrap=True, spacing=12, run_spacing=12)
-        self.remote_gallery_scroll=ft.Column(spacing=0,scroll=ft.ScrollMode.AUTO,controls=[self.gallery])
+        self.remote_gallery_scroll=ft.Column(expand=True,spacing=0,scroll=ft.ScrollMode.AUTO,controls=[self.gallery])
         self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
-        # The gallery host is not mounted at startup. It is created in the layout
-        # only after the user explicitly loads remote images.
-        self.remote_gallery_host=ft.Container(height=0,padding=0,bgcolor="#FFFFFF",content=self.remote_empty,visible=False)
+        # Keep a compact placeholder in the page. Expand it into the gallery only
+        # after images have actually been fetched.
+        self.remote_gallery_host=ft.Container(height=48,padding=12,bgcolor="#FFFFFF",content=self.remote_empty,visible=True)
         self.remote_gallery_loaded=False
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
@@ -213,8 +213,8 @@ class GitNestApp:
         )
 
         self.remote_section=ft.Container(
-            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
-            content=ft.Column(spacing=10,controls=[
+            expand=True,padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+            content=ft.Column(expand=True,spacing=10,controls=[
                 ft.Row([ft.Column([
                     ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
                     ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
@@ -222,7 +222,8 @@ class GitNestApp:
                     ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)],wrap=True),
                 ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict,self.download_workers],wrap=True),
                 self.confirm_download_overwrite,
-                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10)
+                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
+                self.remote_gallery_host
             ])
         )
 
@@ -288,20 +289,14 @@ class GitNestApp:
         if section not in self._workspace_sections:
             return
         self._workspace_active=section
-        self.workspace_content.content=self._workspace_scroll(self._workspace_sections[section])
+        # The remote page has fixed toolbars and its own gallery viewport. Do not
+        # wrap it in the generic outer scroll view (nested scroll views broke the
+        # Windows desktop layout and pushed the controls below a gray viewport).
+        if section == "remote":
+            self.workspace_content.content=self.remote_section
+        else:
+            self.workspace_content.content=self._workspace_scroll(self._workspace_sections[section])
         self.page.update()
-
-    def _detach_remote_gallery(self):
-        """Keep the remote preview host out of the layout until explicitly requested."""
-        controls = self.remote_section.content.controls
-        if self.remote_gallery_host in controls:
-            controls.remove(self.remote_gallery_host)
-
-    def _attach_remote_gallery(self):
-        """Mount the remote preview host only after the user requests remote images."""
-        controls = self.remote_section.content.controls
-        if self.remote_gallery_host not in controls:
-            controls.append(self.remote_gallery_host)
 
     def on_download_conflict_change(self,e):
         self.confirm_download_overwrite.visible=self.download_conflict.value=="overwrite"
@@ -407,10 +402,11 @@ class GitNestApp:
         self.remote_cache={}
         self.gallery.controls.clear()
         self.remote_gallery_loaded=False
-        self.remote_gallery_host.visible=False
-        self.remote_gallery_host.height=0
+        self.remote_gallery_loaded=False
+        self.remote_gallery_host.visible=True
+        self.remote_gallery_host.expand=False
+        self.remote_gallery_host.height=48
         self.remote_gallery_host.content=self.remote_empty
-        self._detach_remote_gallery()
         self.remote_empty.value="尚未读取远程图片。点击“读取远程图片”开始浏览。"
         self.remote_count.value=""
         self.sync_rows=[]
@@ -751,7 +747,7 @@ class GitNestApp:
             self.confirm_overwrite.value=False
             self.upload_progress.value=1 if status=="completed" else 0
             if any(value.get("state")=="uploaded" for value in completed.values()):
-                self.remote_items=[];self.remote_cache={};self.gallery.controls.clear();self.remote_gallery_loaded=False;self.remote_gallery_host.content=self.remote_empty;self._detach_remote_gallery()
+                self.remote_items=[];self.remote_cache={};self.gallery.controls.clear();self.remote_gallery_loaded=False;self.remote_gallery_host.expand=False;self.remote_gallery_host.height=48;self.remote_gallery_host.content=self.remote_empty
         except Exception as ex:
             update_upload_task(task_id,payload=payload,status="failed",summary=f"任务异常：{ex}")
             self.status.value=f"任务 #{task_id} 执行失败：{ex}"
@@ -897,12 +893,16 @@ class GitNestApp:
             if items is None:return
             self.remote_items=items
             self.remote_gallery_loaded=True
-            self.remote_gallery_host.height=420
-            self.remote_gallery_host.content=self.remote_gallery_scroll
             self.remote_gallery_host.visible=True
-            self._attach_remote_gallery()
             self.remote_empty.value="该仓库目录中没有图片。" if not items else "正在生成远程图片预览……"
-            self.remote_gallery_host.content=self.remote_empty
+            if items:
+                self.remote_gallery_host.height=None
+                self.remote_gallery_host.expand=True
+                self.remote_gallery_host.content=self.remote_gallery_scroll
+            else:
+                self.remote_gallery_host.expand=False
+                self.remote_gallery_host.height=48
+                self.remote_gallery_host.content=self.remote_empty
             self.remote_cache={}
             self.gallery.controls=[]
             self.status.value=f"已读取 {len(items)} 张图片，正在生成缩略图……"
@@ -947,14 +947,16 @@ class GitNestApp:
         self.gallery.controls=[]
         if self.remote_items:
             self.remote_empty.value="没有匹配的图片，请调整搜索关键词或格式筛选。"
-        # Do not keep an empty GridView in the control tree: some Flet desktop
-        # renderers paint its native viewport as a large gray rectangle.
-        self.remote_gallery_host.height=420 if self.remote_gallery_loaded else 0
-        self.remote_gallery_host.content=self.remote_gallery_scroll if image_items else self.remote_empty
-        if self.remote_gallery_loaded:
-            self._attach_remote_gallery()
+        # Keep the empty state compact. Only a non-empty loaded gallery receives
+        # the remaining page height and an internal scroll viewport.
+        if self.remote_gallery_loaded and self.remote_items:
+            self.remote_gallery_host.height=None
+            self.remote_gallery_host.expand=True
+            self.remote_gallery_host.content=self.remote_gallery_scroll if image_items else self.remote_empty
         else:
-            self._detach_remote_gallery()
+            self.remote_gallery_host.expand=False
+            self.remote_gallery_host.height=48
+            self.remote_gallery_host.content=self.remote_empty
         self.remote_count.value=f"显示 {len(image_items)} / 共 {len(self.remote_items)} 张"
         for item in image_items:
             entry=self.remote_cache.get(item.path,{})
