@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from threading import Lock
 import flet as ft
-from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs, create_upload_task, update_upload_task, upload_task_rows, get_upload_task
+from gitnest.database import initialize, repositories, save_repository, delete_repository, add_log, logs, create_upload_task, update_upload_task, upload_task_rows, get_upload_task, get_settings, set_setting
 from gitnest.security import save_token, get_token, delete_token
 from gitnest.services import test_repository, remote_images, download_one, download_all, upload_paths, compare_folders, cache_remote_thumbnails, UploadControl
 from gitnest.image_cache import create_local_thumbnail
@@ -26,7 +26,7 @@ class GitNestApp:
         self.local_root=None
         self.file_picker=ft.FilePicker()
         self.page.services.append(self.file_picker)
-        self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260)
+        self.remote_subpath=ft.TextField(label='远程子目录（可选）', hint_text='例如：2026/旅行照片', width=260,on_change=self.save_preferences)
         self.upload_progress=ft.ProgressBar(value=0, width=320, visible=False)
         self.upload_details=ft.Text(selectable=True, size=12, color=ft.Colors.GREY_700, visible=False)
         self.upload_queue_rows=[]
@@ -67,24 +67,27 @@ class GitNestApp:
             on_select=self.filter_remote_gallery)
         self.remote_count=ft.Text(color=ft.Colors.GREY_600,size=12)
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
+        self.local_empty=ft.Text('选择图片或目录后，这里会显示图片预览。',size=12,color=ft.Colors.GREY_500)
         self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
         self.local_load_more=ft.TextButton("加载更多",on_click=self.load_more_local_previews,visible=False)
-        self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True)
+        self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True,on_change=self.save_preferences)
         self.download_folder=ft.TextField(label="远程图片下载到本地目录",expand=True,read_only=True)
         self.download_conflict=ft.Dropdown(label="下载同名文件",width=180,value="skip",options=[
             ft.DropdownOption("skip","跳过本地文件"),ft.DropdownOption("rename","自动重命名"),
             ft.DropdownOption("overwrite","覆盖本地文件")],on_select=self.on_download_conflict_change)
         self.confirm_download_overwrite=ft.Checkbox(label="我确认覆盖本地同名文件",value=False,visible=False)
-        self.download_workers=ft.Dropdown(label="下载并发",value="4",width=130,options=[
+        self.download_workers=ft.Dropdown(label="下载并发",value="4",width=130,on_select=self.save_preferences,options=[
             ft.DropdownOption("1","1 线程"),ft.DropdownOption("2","2 线程"),
             ft.DropdownOption("3","3 线程"),ft.DropdownOption("4","4 线程"),
             ft.DropdownOption("6","6 线程"),ft.DropdownOption("8","8 线程")])
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
         self.gallery=ft.GridView(expand=False, height=320, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12, visible=False)
+        self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
         self.history=self.build_history()
+        self.restore_preferences()
         self.body=ft.Container(expand=True,padding=28,bgcolor="#F4F6FA",content=self.workspace)
         self.navigation=ft.NavigationRail(selected_index=0,label_type=ft.NavigationRailLabelType.ALL,
             min_width=156,group_alignment=-0.9,bgcolor="#FFFFFF",
@@ -157,9 +160,9 @@ class GitNestApp:
     def build_workspace(self):
         self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,on_select=self.on_conflict_change,options=[
             ft.DropdownOption("skip","跳过已存在文件"),ft.DropdownOption("overwrite","覆盖远程文件"),
-            ft.DropdownOption("rename","自动重命名")])
-        self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",width=280)
-        self.upload_workers=ft.Dropdown(label="并发线程",value="3",width=130,options=[
+            ft.DropdownOption("rename","自动重命名")],on_select=self.save_preferences)
+        self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",width=280,on_change=self.save_preferences)
+        self.upload_workers=ft.Dropdown(label="上传并发",value="3",width=130,on_select=self.save_preferences,options=[
             ft.DropdownOption("1","1 线程"),ft.DropdownOption("2","2 线程"),
             ft.DropdownOption("3","3 线程"),ft.DropdownOption("4","4 线程"),
             ft.DropdownOption("5","5 线程")])
@@ -190,6 +193,7 @@ class GitNestApp:
                     self.upload_progress
                 ],wrap=True),
                 self.local_folder,
+                self.local_empty,
                 self.local_gallery,
                 self.local_load_more,
             ])
@@ -205,6 +209,7 @@ class GitNestApp:
                 ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict,self.download_workers],wrap=True),
                 self.confirm_download_overwrite,
                 ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
+                self.remote_empty,
                 self.gallery
             ])
         )
@@ -253,6 +258,7 @@ class GitNestApp:
 
     def on_download_conflict_change(self,e):
         self.confirm_download_overwrite.visible=self.download_conflict.value=="overwrite"
+        self.save_preferences()
         if not self.confirm_download_overwrite.visible:
             self.confirm_download_overwrite.value=False
         self.page.update()
@@ -262,6 +268,7 @@ class GitNestApp:
             selected=await self.file_picker.get_directory_path(dialog_title="选择远程图片保存目录")
             if selected:
                 self.download_folder.value=selected
+                self.save_preferences()
                 self.status.value=f"下载目录已设置：{selected}"
                 self.page.update()
         except Exception as ex:
@@ -270,6 +277,7 @@ class GitNestApp:
 
     def on_conflict_change(self,e):
         self.confirm_overwrite.visible=self.conflict.value=="overwrite"
+        self.save_preferences()
         if not self.confirm_overwrite.visible:
             self.confirm_overwrite.value=False
         self.page.update()
@@ -290,6 +298,47 @@ class GitNestApp:
         if index==1:self.refresh_repo_cards()
         if index==2:self.refresh_history()
         self.page.update()
+
+
+    def restore_preferences(self):
+        """Restore non-secret desktop preferences saved in SQLite."""
+        try:
+            values=get_settings()
+            controls=(
+                ("download_folder",self.download_folder),
+                ("download_conflict",self.download_conflict),
+                ("download_workers",self.download_workers),
+                ("upload_conflict",self.conflict),
+                ("upload_workers",self.upload_workers),
+                ("commit_message",self.commit_message),
+                ("remote_subpath",self.remote_subpath),
+                ("local_folder",self.local_folder),
+            )
+            for key,control in controls:
+                if key in values:
+                    control.value=values[key]
+            self.confirm_download_overwrite.visible=self.download_conflict.value=="overwrite"
+            self.confirm_overwrite.visible=self.conflict.value=="overwrite"
+        except Exception as ex:
+            self.status.value=f"设置读取失败，已使用默认设置：{ex}"
+
+    def save_preferences(self,e=None):
+        controls=(
+            ("download_folder",self.download_folder),
+            ("download_conflict",self.download_conflict),
+            ("download_workers",self.download_workers),
+            ("upload_conflict",self.conflict),
+            ("upload_workers",self.upload_workers),
+            ("commit_message",self.commit_message),
+            ("remote_subpath",self.remote_subpath),
+            ("local_folder",self.local_folder),
+        )
+        try:
+            for key,control in controls:
+                if control.value is not None:
+                    set_setting(key,control.value)
+        except Exception as ex:
+            self.status.value=f"设置保存失败：{ex}"
 
     def current_repo(self):
         rid=self.repo_dropdown.value
@@ -386,6 +435,7 @@ class GitNestApp:
         self._local_preview_next=0
         self._local_preview_page_size=100
         self.local_gallery.visible=bool(unique)
+        self.local_empty.visible=not bool(unique)
         self.local_gallery.controls=[]
         self.upload_button.disabled=not unique
         self.folder_upload_button.disabled=not (self.local_mode=="folder" and unique)
@@ -468,6 +518,7 @@ class GitNestApp:
         self._local_preview_generation=getattr(self,"_local_preview_generation",0)+1
         self.local_files=[]
         self.local_gallery.visible=False
+        self.local_empty.visible=True
         self.local_mode="files"
         self.local_root=None
         self.local_folder.value=""
@@ -506,6 +557,7 @@ class GitNestApp:
                     for p in self.local_files
                 }
             }
+            self.save_preferences()
             task_id=create_upload_task(repo["id"],payload)
             self.active_task_id=task_id
             await self.execute_upload_task(task_id,payload,repo)
@@ -808,6 +860,9 @@ class GitNestApp:
             image_items.sort(key=lambda x:x.name.casefold())
         self.gallery.controls=[]
         self.gallery.visible=bool(image_items)
+        self.remote_empty.visible=not bool(image_items)
+        self.remote_empty.value=("尚未读取远程图片。点击“读取远程图片”开始浏览。" if not self.remote_items
+                                 else "没有匹配的图片，请调整搜索关键词或格式筛选。")
         self.remote_count.value=f"显示 {len(image_items)} / 共 {len(self.remote_items)} 张"
         for item in image_items:
             entry=self.remote_cache.get(item.path,{})
@@ -916,6 +971,7 @@ class GitNestApp:
     async def download_remote_all(self,e):
         try:
             if not self.download_folder.value:raise ValueError("请先选择独立的下载目录")
+            self.save_preferences()
             if not self.remote_items:raise ValueError("请先读取远程图片")
             if self.download_conflict.value=="overwrite" and not self.confirm_download_overwrite.value:
                 raise ValueError("覆盖模式会替换本地同名文件，请先勾选覆盖确认")
