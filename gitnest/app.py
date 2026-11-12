@@ -71,7 +71,9 @@ class GitNestApp:
         self.local_gallery=ft.Row(wrap=True, spacing=10, run_spacing=10, visible=False)
         self.local_load_more=ft.TextButton("加载更多",on_click=self.load_more_local_previews,visible=False)
         self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True)
-        self.download_folder=ft.TextField(label="远程图片下载到本地目录",expand=True,read_only=True)
+        # This field lives inside a wrapping Row. Giving it a fixed width keeps the
+        # wrap layout bounded; expand=True there is measured as an unbounded height.
+        self.download_folder=ft.TextField(label="远程图片下载到本地目录",width=360,read_only=True)
         self.download_conflict=ft.Dropdown(label="下载同名文件",width=180,value="skip",options=[
             ft.DropdownOption("skip","跳过本地文件"),ft.DropdownOption("rename","自动重命名"),
             ft.DropdownOption("overwrite","覆盖本地文件")],on_select=self.on_download_conflict_change)
@@ -82,8 +84,8 @@ class GitNestApp:
             ft.DropdownOption("6","6 线程"),ft.DropdownOption("8","8 线程")])
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
-        # Use a wrapping Row instead of GridView: the native GridView viewport
-        # can render as a large gray surface on some Windows/Flet builds.
+        # Use a plain wrapping Row of fixed-width cards. A native GridView / nested
+        # scroll viewport adds another scroll extent, and cards must never expand.
         self.gallery=ft.Row(wrap=True, spacing=12, run_spacing=12)
         self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
         # Keep a compact placeholder in the page. Expand it into the gallery only
@@ -214,11 +216,21 @@ class GitNestApp:
         self.remote_section=ft.Container(
             padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
             content=ft.Column(spacing=10,controls=[
-                ft.Row([ft.Column([
-                    ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
-                    ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
-                ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote),
-                    ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)],wrap=True),
+                # Never put an expanded child in a wrapping Row: Flet measures it
+                # with an unbounded height (~100000 px) and the page grows a huge
+                # gray scroll area. Group the actions and use space-between so the
+                # buttons still sit on the right while narrow windows can wrap.
+                ft.Row([
+                    ft.Column(spacing=4,controls=[
+                        ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
+                        ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
+                    ]),
+                    ft.Row(spacing=8,controls=[
+                        ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote),
+                        ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)
+                    ])
+                ],wrap=True,alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,run_spacing=10),
                 ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict,self.download_workers],wrap=True),
                 self.confirm_download_overwrite,
                 ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
@@ -288,11 +300,10 @@ class GitNestApp:
         if section not in self._workspace_sections:
             return
         self._workspace_active=section
-        # Use exactly one scroll viewport for every workspace section.
-        # The remote section used to own an inner scrollable Column while bypassing
-        # the workspace scroll container. On Windows this produced an oversized
-        # gray viewport and prevented normal page scrolling. Keep the section
-        # content non-scrollable and let the common workspace viewport own scrolling.
+        # Use exactly one scroll viewport for every workspace section. Keep section
+        # content non-scrollable, and keep every child of a wrapping Row at a fixed
+        # width: an expanded child is measured with an unbounded height and creates
+        # a huge gray scroll area that users have to drag through.
         self.workspace_content.content=self._workspace_scroll(self._workspace_sections[section])
         self.page.update()
 
