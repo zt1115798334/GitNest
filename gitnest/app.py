@@ -53,7 +53,7 @@ class GitNestApp:
         self.pause_upload_button=ft.OutlinedButton("暂停上传",icon=ft.Icons.PAUSE,on_click=self.pause_upload,disabled=True)
         self.resume_upload_button=ft.OutlinedButton("继续上传",icon=ft.Icons.PLAY_ARROW,on_click=self.resume_upload,disabled=True)
         self.cancel_upload_button=ft.OutlinedButton("取消任务",icon=ft.Icons.CANCEL,on_click=self.cancel_upload,disabled=True)
-        self.saved_tasks=ft.Column(spacing=4)
+        self.saved_tasks=ft.Column(spacing=4,scroll=ft.ScrollMode.AUTO)
         self.retry_failed_button=ft.OutlinedButton("重试失败任务",icon=ft.Icons.REFRESH,on_click=self.retry_failed_uploads,visible=False)
         self.remote_cache={}
         self.remote_search=ft.TextField(label="搜索图片名称或路径",prefix_icon=ft.Icons.SEARCH,width=280,on_change=self.filter_remote_gallery)
@@ -207,7 +207,7 @@ class GitNestApp:
                 ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD,color="#202B3C"),
                 ft.Text("设置远程目录、文件冲突规则、提交说明和上传并发。",size=12,color="#7A8495"),
                 ft.Row([self.remote_subpath,self.conflict,self.commit_message,self.upload_workers],wrap=True,spacing=10),
-                self.confirm_overwrite,self.status
+                self.confirm_overwrite
             ])
         )
 
@@ -244,6 +244,7 @@ class GitNestApp:
             content=ft.Column(spacing=12,controls=[
                 ft.Row([ft.Text("任务中心",size=20,weight=ft.FontWeight.BOLD,color="#202B3C"),
                     ft.Container(expand=True),ft.Text("独立查看任务状态与处理进度",size=11,color="#8993A5")]),
+                self.status,
                 self.queue_panel,
                 ft.Row([self.pause_upload_button,self.resume_upload_button,self.cancel_upload_button],wrap=True),
                 self.retry_failed_button,self.upload_details,
