@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
 import os
 import tempfile
@@ -108,17 +108,27 @@ def download_one(repository: dict, token: str, remote_path: str, target_root: st
         provider.close()
 
 
-def download_all(repository: dict, token: str, target_root: str, remote_items: list, conflict: str = "skip"):
-    results = []
-    for item in remote_items:
+def download_all(repository: dict, token: str, target_root: str, remote_items: list, conflict: str = "skip", max_workers: int = 4):
+    """Download with bounded parallelism and preserve input result order."""
+    if not remote_items:
+        return []
+    worker_count = max(1, min(int(max_workers), 8))
+    results = [None] * len(remote_items)
+
+    def download_one_item(index, item):
         try:
             path = download_one(repository, token, item.path, target_root, conflict)
             if path is None:
-                results.append((item.path, "skipped", "本地同名文件已存在，按策略跳过"))
-            else:
-                results.append((item.path, "downloaded", str(path)))
+                return (item.path, "skipped", "本地同名文件已存在，按策略跳过")
+            return (item.path, "downloaded", str(path))
         except Exception as exc:
-            results.append((item.path, "failed", str(exc)))
+            return (item.path, "failed", str(exc))
+
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="gitnest-download") as executor:
+        futures = {executor.submit(download_one_item, index, item): index
+                   for index, item in enumerate(remote_items)}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
     return results
 
 
@@ -251,17 +261,24 @@ def upload_paths(
 
     if not paths:
         return []
+    # Bound queued futures so huge folders do not consume unbounded memory.
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="gitnest-upload") as executor:
-        futures = {
-            executor.submit(upload_one, index, selected): index
-            for index, selected in enumerate(paths)
-        }
-        for future in as_completed(futures):
-            index = futures[future]
-            try:
-                future.result()
-            except Exception as exc:
-                results_by_index[index] = (str(paths[index]), "failed", str(exc))
+        pending = {}
+        next_index = 0
+        while next_index < len(paths) and len(pending) < max_workers:
+            pending[executor.submit(upload_one, next_index, paths[next_index])] = next_index
+            next_index += 1
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                index = pending.pop(future)
+                try:
+                    future.result()
+                except Exception as exc:
+                    results_by_index[index] = (str(paths[index]), "failed", str(exc))
+                if next_index < len(paths):
+                    pending[executor.submit(upload_one, next_index, paths[next_index])] = next_index
+                    next_index += 1
     return [results_by_index[index] for index in range(len(paths))]
 
 
