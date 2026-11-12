@@ -395,11 +395,29 @@ class GitNestApp:
         for r in repositories():
             self.repo_cards.controls.append(ft.Card(content=ft.Container(padding=12,content=ft.Row([
                 ft.Column([ft.Text(r["name"],weight=ft.FontWeight.BOLD),ft.Text(f'{r["platform"]} · {r["owner"]}/{r["repo"]} · {r["branch"]} · {r["base_path"]}',size=12)],expand=True),
-                ft.OutlinedButton("删除配置",icon=ft.Icons.DELETE,on_click=lambda e,row=r:self.remove_repo(row))]))))
+                ft.OutlinedButton("删除配置",icon=ft.Icons.DELETE,on_click=lambda e,row=r:self.confirm_remove_repo(row))]))))
         if self.page:self.page.update()
 
+    def confirm_remove_repo(self,row):
+        dialog=ft.AlertDialog(
+            modal=True,
+            title=ft.Text("删除仓库配置？"),
+            content=ft.Text(
+                f"确定删除“{row['name']}”吗？关联的历史任务和操作记录会保留，但该仓库的访问凭据也会被删除。"
+            ),
+            actions=[
+                ft.TextButton("取消",on_click=lambda e:self.page.pop_dialog()),
+                ft.Button("确认删除",icon=ft.Icons.DELETE,on_click=lambda e:self.remove_repo(row)),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(dialog)
+
     def remove_repo(self,row):
+        self.page.pop_dialog()
         delete_repository(row["id"]);delete_token(row);self.refresh_repositories()
+        self.status.value=f"已删除仓库配置：{row['name']}"
+        self.page.update()
 
     async def pick_files(self,e=None):
         try:
