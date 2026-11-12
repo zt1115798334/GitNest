@@ -161,6 +161,12 @@ class GitNestApp:
             ft.DropdownOption("5","5 线程")])
         self.confirm_overwrite=ft.Checkbox(label="我确认覆盖远程同路径图片",value=False,visible=False)
         self.preview_text=ft.Text(selectable=True)
+        self.sync_rows=[]
+        self.sync_selected=set()
+        self.sync_result_list=ft.Column(spacing=6)
+        self.sync_upload_button=ft.Button("上传选中项",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.sync_upload_selected,disabled=True)
+        self.sync_download_button=ft.OutlinedButton("下载选中项",icon=ft.Icons.DOWNLOAD,on_click=self.sync_download_selected,disabled=True)
+        self.sync_selection_summary=ft.Text("尚未选择同步项目",size=12,color=ft.Colors.GREY_600)
         self.status=ft.Text("选择仓库和本地图片，即可开始管理",color=ft.Colors.GREY_600)
         self.upload_button=ft.Button("上传所选图片",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_selected,disabled=True)
         self.folder_upload_button=ft.OutlinedButton("上传整个目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.upload_local,disabled=True)
@@ -231,7 +237,12 @@ class GitNestApp:
                 content=ft.Column(spacing=10,controls=[
                     ft.Text("同步差异",size=18,weight=ft.FontWeight.BOLD),
                     ft.Text("按文件内容 SHA-256 比较本地和远程图片，不会自动删除任何文件。",size=12,color=ft.Colors.GREY_600),
-                    ft.OutlinedButton("比较本地与远程内容",icon=ft.Icons.COMPARE_ARROWS,on_click=self.sync_preview),
+                    ft.Row([
+                        ft.OutlinedButton("比较本地与远程内容",icon=ft.Icons.COMPARE_ARROWS,on_click=self.sync_preview),
+                        self.sync_upload_button,self.sync_download_button,
+                    ],wrap=True),
+                    self.sync_selection_summary,
+                    self.sync_result_list,
                     self.preview_text
                 ]))
         ])
@@ -903,27 +914,121 @@ class GitNestApp:
             return
         await self.upload_selected(e)
 
+    def update_sync_selection(self, path, checked):
+        if checked:
+            self.sync_selected.add(path)
+        else:
+            self.sync_selected.discard(path)
+        selected=[row for row in self.sync_rows if row["path"] in self.sync_selected]
+        uploads=sum(1 for row in selected if row["action"]=="upload")
+        downloads=sum(1 for row in selected if row["action"]=="download")
+        self.sync_selection_summary.value=f"已勾选 {len(selected)} 项：上传 {uploads}，下载 {downloads}（内容不同/比对失败的项目不会自动同步）"
+        self.sync_upload_button.disabled=uploads==0
+        self.sync_download_button.disabled=downloads==0
+        self.page.update()
+
     async def sync_preview(self,e):
         try:
-            if not self.local_folder.value:raise ValueError("请先选择本地目录")
-            if not self.remote_items:raise ValueError("请先读取远程图片")
-            repo=self.current_repo();rows=await self.run_background(compare_folders,repo,self.token_for(repo),self.local_folder.value,self.remote_items)
-            if rows is None:return
-            labels={"local_only":"仅本地（建议上传）","remote_only":"仅远程（建议下载）",
-                    "same":"内容一致","different":"内容不同（冲突）","error":"比对失败（需重试）"}
-            lines=[]
+            if not self.local_folder.value:
+                raise ValueError("请先选择本地目录")
+            if not self.remote_items:
+                raise ValueError("请先读取远程图片")
+            repo=self.current_repo()
+            rows=await self.run_background(compare_folders,repo,self.token_for(repo),self.local_folder.value,self.remote_items)
+            if rows is None:
+                return
+            self.sync_rows=rows
+            self.sync_selected=set()
+            self.sync_result_list.controls=[]
+            labels={"local_only":"仅本地 · 可上传","remote_only":"仅远程 · 可下载",
+                    "same":"内容一致","different":"内容不同 · 需要人工确认","error":"比对失败 · 暂不可同步"}
             for row in rows:
-                line=f"{labels[row['status']]} | {row['path']}"
-                if row.get("local_size") is not None or row.get("remote_size") is not None:
-                    line+=f"\n  本地：{row.get('local_size','-')} bytes；远程：{row.get('remote_size','-')} bytes"
-                if row.get("local_sha256") or row.get("remote_sha256"):
-                    line+=f"\n  本地 SHA-256：{row.get('local_sha256') or '-'}\n  远程 SHA-256：{row.get('remote_sha256') or '-'}"
-                if row.get("error"):line+=f"\n  错误：{row['error']}"
-                lines.append(line)
-            counts={key:sum(1 for row in rows if row['status']==key) for key in labels}
-            summary="比较结果："+"；".join(f"{labels[k]} {v}" for k,v in counts.items() if v)
-            self.preview_text.value=summary+"\n\n"+"\n\n".join(lines) if rows else "两端没有图片文件"
-        except Exception as ex:self.preview_text.value=f"比较失败：{ex}"
+                actionable=row["status"] in {"local_only","remote_only"}
+                checkbox=ft.Checkbox(
+                    value=False,disabled=not actionable,
+                    on_change=lambda event,p=row["path"]:self.update_sync_selection(p,event.control.value)
+                )
+                details=f"本地：{row.get('local_size') if row.get('local_size') is not None else '-'} bytes  |  远程：{row.get('remote_size') if row.get('remote_size') is not None else '-'} bytes"
+                if row.get("error"):
+                    details+=f"  |  {row['error']}"
+                self.sync_result_list.controls.append(
+                    ft.Container(
+                        padding=ft.Padding(8,5,8,5),
+                        border=ft.Border.all(1,"#E7EBF2"),
+                        border_radius=8,
+                        content=ft.Row([
+                            checkbox,
+                            ft.Column([
+                                ft.Text(f"{labels[row['status']]}  |  {row['path']}",weight=ft.FontWeight.W_500),
+                                ft.Text(details,size=11,color=ft.Colors.GREY_600)
+                            ],spacing=2,expand=True)
+                        ],vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                    )
+                )
+            counts={key:sum(1 for row in rows if row["status"]==key) for key in labels}
+            summary="比较完成："+"；".join(f"{labels[k]} {v}" for k,v in counts.items() if v)
+            self.preview_text.value=summary if rows else "两端没有图片文件"
+            self.sync_selection_summary.value="请勾选需要上传或下载的项目；内容不同的文件需先人工确认。"
+            self.sync_upload_button.disabled=True
+            self.sync_download_button.disabled=True
+            self.status.value="差异分析完成：仅本地和仅远程项目可勾选执行"
+        except Exception as ex:
+            self.preview_text.value=f"比较失败：{ex}"
+            self.status.value=f"同步比较失败：{ex}"
+        self.page.update()
+
+    async def sync_upload_selected(self,e=None):
+        try:
+            selected=[row for row in self.sync_rows
+                      if row["path"] in self.sync_selected and row["action"]=="upload"]
+            if not selected:
+                raise ValueError("请先勾选仅本地的图片")
+            if self.conflict.value=="overwrite" and not self.confirm_overwrite.value:
+                raise ValueError("覆盖远程文件需要先勾选覆盖确认")
+            root=Path(self.local_folder.value).expanduser().resolve()
+            paths=[(root / row["path"]).resolve() for row in selected]
+            if any(not path.is_relative_to(root) or not path.is_file() for path in paths):
+                raise ValueError("部分本地文件已不存在或路径异常，请重新比较")
+            self.local_root=root
+            self.local_mode="folder"
+            self.local_files=paths
+            self.local_summary.value=f"同步待上传 {len(paths)} 张图片"
+            self.page.update()
+            await self.upload_selected(e)
+            # Upload task completion is tracked by the existing persistent task center.
+        except Exception as ex:
+            self.status.value=f"同步上传失败：{ex}"
+            self.page.update()
+
+    async def sync_download_selected(self,e=None):
+        try:
+            selected=[row for row in self.sync_rows
+                      if row["path"] in self.sync_selected and row["action"]=="download"]
+            if not selected:
+                raise ValueError("请先勾选仅远程的图片")
+            if not self.download_folder.value:
+                raise ValueError("请先设置独立的下载目录")
+            if self.download_conflict.value=="overwrite" and not self.confirm_download_overwrite.value:
+                raise ValueError("覆盖本地文件需要先勾选覆盖确认")
+            selected_paths={row["path"] for row in selected}
+            items=[item for item in self.remote_items
+                   if any(item.path.endswith("/"+path) or item.path==path for path in selected_paths)]
+            if len(items)!=len(selected):
+                raise ValueError("远程文件列表已变化，请重新读取远程图片并比较")
+            repo=self.current_repo()
+            results=await self.run_background(download_all,repo,self.token_for(repo),
+                self.download_folder.value,items,self.download_conflict.value)
+            if results is None:
+                return
+            counts={"downloaded":0,"skipped":0,"failed":0}
+            for path,state,message in results:
+                counts[state]=counts.get(state,0)+1
+                add_log(repo["id"],"sync_download",path,state,message)
+            self.status.value=f"选中项下载完成：成功 {counts['downloaded']}，跳过 {counts['skipped']}，失败 {counts['failed']}"
+            self.sync_selected.clear()
+            self.update_sync_selection("",False)
+        except Exception as ex:
+            self.status.value=f"同步下载失败：{ex}"
         self.page.update()
 
     def refresh_history(self,e=None):
