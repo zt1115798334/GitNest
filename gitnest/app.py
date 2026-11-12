@@ -68,7 +68,7 @@ class GitNestApp:
         self.remote_count=ft.Text(color=ft.Colors.GREY_600,size=12)
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
         self.local_empty=ft.Text('选择图片或目录后，这里会显示图片预览。',size=12,color=ft.Colors.GREY_500)
-        self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
+        self.local_gallery=ft.Row(wrap=True, spacing=10, run_spacing=10, visible=False)
         self.local_load_more=ft.TextButton("加载更多",on_click=self.load_more_local_previews,visible=False)
         self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True)
         self.download_folder=ft.TextField(label="远程图片下载到本地目录",expand=True,read_only=True)
@@ -82,7 +82,9 @@ class GitNestApp:
             ft.DropdownOption("6","6 线程"),ft.DropdownOption("8","8 线程")])
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
-        self.gallery=ft.GridView(expand=False, height=320, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12)
+        # Use a wrapping Row instead of GridView: the native GridView viewport
+        # can render as a large gray surface on some Windows/Flet builds.
+        self.gallery=ft.Row(wrap=True, spacing=12, run_spacing=12)
         self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
         # Mount exactly one remote-gallery state at a time. An unmounted GridView
         # cannot leave behind an empty native scroll viewport on Flet desktop.
@@ -904,7 +906,7 @@ class GitNestApp:
                            ft.Container(height=120,alignment=ft.Alignment.CENTER,
                                content=ft.Column([ft.Icon(ft.Icons.BROKEN_IMAGE,size=36),
                                    ft.Text("缩略图不可用",size=11)],alignment=ft.MainAxisAlignment.CENTER)))
-            card=ft.Container(border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),border_radius=10,padding=8,
+            card=ft.Container(width=220,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),border_radius=10,padding=8,
                 content=ft.Column([ft.Container(height=126,alignment=ft.Alignment.CENTER,content=image_control),
                     ft.Text(item.name,max_lines=1,overflow=ft.TextOverflow.ELLIPSIS,weight=ft.FontWeight.BOLD),
                     ft.Text(f"{item.size:,} bytes",size=11,color=ft.Colors.GREY_600),
