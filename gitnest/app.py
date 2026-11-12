@@ -85,10 +85,11 @@ class GitNestApp:
         # Use a wrapping Row instead of GridView: the native GridView viewport
         # can render as a large gray surface on some Windows/Flet builds.
         self.gallery=ft.Row(wrap=True, spacing=12, run_spacing=12)
+        self.remote_gallery_scroll=ft.Column(spacing=0,scroll=ft.ScrollMode.AUTO,controls=[self.gallery])
         self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
-        # Mount exactly one remote-gallery state at a time. An unmounted GridView
-        # cannot leave behind an empty native scroll viewport on Flet desktop.
-        self.remote_gallery_host=ft.Container(content=self.remote_empty,visible=False)
+        # The gallery host is not mounted at startup. It is created in the layout
+        # only after the user explicitly loads remote images.
+        self.remote_gallery_host=ft.Container(height=0,padding=0,bgcolor="#FFFFFF",content=self.remote_empty,visible=False)
         self.remote_gallery_loaded=False
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
@@ -221,8 +222,7 @@ class GitNestApp:
                     ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)],wrap=True),
                 ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict,self.download_workers],wrap=True),
                 self.confirm_download_overwrite,
-                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
-                self.remote_gallery_host
+                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10)
             ])
         )
 
@@ -407,7 +407,8 @@ class GitNestApp:
         self.remote_cache={}
         self.gallery.controls.clear()
         self.remote_gallery_loaded=False
-        self.remote_gallery_host.visible=True
+        self.remote_gallery_host.visible=False
+        self.remote_gallery_host.height=0
         self.remote_gallery_host.content=self.remote_empty
         self._detach_remote_gallery()
         self.remote_empty.value="尚未读取远程图片。点击“读取远程图片”开始浏览。"
@@ -896,8 +897,10 @@ class GitNestApp:
             if items is None:return
             self.remote_items=items
             self.remote_gallery_loaded=True
-            self._attach_remote_gallery()
+            self.remote_gallery_host.height=420
+            self.remote_gallery_host.content=self.remote_gallery_scroll
             self.remote_gallery_host.visible=True
+            self._attach_remote_gallery()
             self.remote_empty.value="该仓库目录中没有图片。" if not items else "正在生成远程图片预览……"
             self.remote_gallery_host.content=self.remote_empty
             self.remote_cache={}
@@ -946,7 +949,8 @@ class GitNestApp:
             self.remote_empty.value="没有匹配的图片，请调整搜索关键词或格式筛选。"
         # Do not keep an empty GridView in the control tree: some Flet desktop
         # renderers paint its native viewport as a large gray rectangle.
-        self.remote_gallery_host.content=self.gallery if image_items else self.remote_empty
+        self.remote_gallery_host.height=420 if self.remote_gallery_loaded else 0
+        self.remote_gallery_host.content=self.remote_gallery_scroll if image_items else self.remote_empty
         if self.remote_gallery_loaded:
             self._attach_remote_gallery()
         else:
