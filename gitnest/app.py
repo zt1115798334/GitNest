@@ -69,7 +69,12 @@ class GitNestApp:
         self.local_summary=ft.Text('尚未选择图片', color=ft.Colors.GREY_600)
         self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
         self.local_load_more=ft.TextButton("加载更多",on_click=self.load_more_local_previews,visible=False)
-        self.local_folder=ft.TextField(label="本地图片目录", expand=True)
+        self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True)
+        self.download_folder=ft.TextField(label="远程图片下载到本地目录",expand=True,read_only=True)
+        self.download_conflict=ft.Dropdown(label="下载同名文件",width=180,value="skip",options=[
+            ft.DropdownOption("skip","跳过本地文件"),ft.DropdownOption("rename","自动重命名"),
+            ft.DropdownOption("overwrite","覆盖本地文件")],on_select=self.on_download_conflict_change)
+        self.confirm_download_overwrite=ft.Checkbox(label="我确认覆盖本地同名文件",value=False,visible=False)
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
         self.gallery=ft.GridView(expand=False, height=320, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12, visible=False)
@@ -176,6 +181,7 @@ class GitNestApp:
                 ],wrap=True),
                 self.local_folder,
                 self.local_gallery,
+                self.local_load_more,
             ])
         )
         self.remote_section=ft.Container(
@@ -185,7 +191,9 @@ class GitNestApp:
                     ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
                     ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
                 ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote),
-                    ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)]),
+                    ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)],wrap=True),
+                ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict],wrap=True),
+                self.confirm_download_overwrite,
                 ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
                 self.gallery
             ])
@@ -227,6 +235,23 @@ class GitNestApp:
                     self.preview_text
                 ]))
         ])
+
+    def on_download_conflict_change(self,e):
+        self.confirm_download_overwrite.visible=self.download_conflict.value=="overwrite"
+        if not self.confirm_download_overwrite.visible:
+            self.confirm_download_overwrite.value=False
+        self.page.update()
+
+    async def pick_download_folder(self,e=None):
+        try:
+            selected=await self.file_picker.get_directory_path(dialog_title="选择远程图片保存目录")
+            if selected:
+                self.download_folder.value=selected
+                self.status.value=f"下载目录已设置：{selected}"
+                self.page.update()
+        except Exception as ex:
+            self.status.value=f"选择下载目录失败：{ex}"
+            self.page.update()
 
     def on_conflict_change(self,e):
         self.confirm_overwrite.visible=self.conflict.value=="overwrite"
@@ -460,7 +485,11 @@ class GitNestApp:
                 "commit_message":self.commit_message.value or "GitNest image upload",
                 "remote_subpath":self.remote_subpath.value or "",
                 "max_workers":int(self.upload_workers.value or "3"),
-                "completed":{}
+                "completed":{},
+                "file_signatures":{
+                    str(p.resolve()):{"size":p.stat().st_size,"mtime_ns":p.stat().st_mtime_ns}
+                    for p in self.local_files
+                }
             }
             task_id=create_upload_task(repo["id"],payload)
             self.active_task_id=task_id
@@ -525,7 +554,8 @@ class GitNestApp:
                 payload.get("conflict","skip"),payload.get("commit_message","GitNest image upload"),
                 payload.get("remote_subpath",""),payload.get("relative_to"),
                 progress_callback=progress_callback,control=control,
-                max_workers=int(payload.get("max_workers",3))
+                max_workers=int(payload.get("max_workers",3)),
+                expected_files=payload.get("file_signatures")
             )
             if results is None:
                 update_upload_task(task_id,payload=payload,status="failed",summary="上传执行异常，请检查日志")
@@ -830,23 +860,40 @@ class GitNestApp:
 
     async def download_single(self,item):
         try:
-            if not self.local_folder.value:raise ValueError("请先选择本地保存目录")
-            repo=self.current_repo();result=await self.run_background(download_one,repo,self.token_for(repo),item.path,self.local_folder.value)
-            if result:add_log(repo["id"],"download",item.path,"success",str(result));self.status.value=f"下载成功：{result}"
-        except Exception as ex:self.status.value=f"下载失败：{ex}"
+            if not self.download_folder.value:raise ValueError("请先选择独立的下载目录")
+            if self.download_conflict.value=="overwrite" and not self.confirm_download_overwrite.value:
+                raise ValueError("覆盖模式会替换本地同名文件，请先勾选覆盖确认")
+            repo=self.current_repo()
+            result=await self.run_background(download_one,repo,self.token_for(repo),item.path,
+                self.download_folder.value,self.download_conflict.value)
+            if result is None:
+                add_log(repo["id"],"download",item.path,"skipped","本地同名文件已存在，按策略跳过")
+                self.status.value=f"已跳过：{item.name}（本地文件已存在）"
+            else:
+                add_log(repo["id"],"download",item.path,"success",str(result))
+                self.status.value=f"下载成功：{result}"
+        except Exception as ex:
+            self.status.value=f"下载失败：{ex}"
         self.page.update()
 
     async def download_remote_all(self,e):
         try:
-            if not self.local_folder.value:raise ValueError("请先选择本地保存目录")
+            if not self.download_folder.value:raise ValueError("请先选择独立的下载目录")
             if not self.remote_items:raise ValueError("请先读取远程图片")
-            repo=self.current_repo();results=await self.run_background(download_all,repo,self.token_for(repo),self.local_folder.value,self.remote_items)
+            if self.download_conflict.value=="overwrite" and not self.confirm_download_overwrite.value:
+                raise ValueError("覆盖模式会替换本地同名文件，请先勾选覆盖确认")
+            repo=self.current_repo()
+            results=await self.run_background(download_all,repo,self.token_for(repo),
+                self.download_folder.value,self.remote_items,self.download_conflict.value)
             if results is None:return
-            ok=0
-            for path,success,msg in results:
-                good=success;ok+=int(good);add_log(repo["id"],"download",path,"success" if good else "failed",msg)
-            self.status.value=f"批量下载完成：成功 {ok}，失败 {len(results)-ok}"
-        except Exception as ex:self.status.value=f"下载失败：{ex}"
+            counts={"downloaded":0,"skipped":0,"failed":0}
+            for path,state,msg in results:
+                counts[state]=counts.get(state,0)+1
+                add_log(repo["id"],"download",path,"success" if state=="downloaded" else state,msg)
+            self.status.value=(f"批量下载完成：成功 {counts['downloaded']}，跳过 {counts['skipped']}，"
+                               f"失败 {counts['failed']}")
+        except Exception as ex:
+            self.status.value=f"下载失败：{ex}"
         self.page.update()
 
     async def upload_local(self,e):
