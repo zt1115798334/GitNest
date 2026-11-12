@@ -112,3 +112,12 @@ python -m compileall -q .
 - SQLite uses WAL mode, a busy timeout, foreign-key enforcement, and indexes for task/history queries.
 - Looking up a task by ID now uses a direct query instead of loading and decoding the latest 500 task payloads.
 - Upload and download worker counts are independently configurable. Increase concurrency gradually; provider API rate limits and local network bandwidth still apply.
+
+
+## Desktop experience improvements
+
+- Remembers non-secret workspace preferences such as local upload folder, download folder, upload/download conflict policies, worker counts, remote subdirectory, and commit message in the local SQLite database.
+- Shows clear empty states for local and remote image galleries, including when filters return no results.
+- Displays task states in Chinese for easier scanning.
+- Requires explicit confirmation before deleting a repository configuration; its credential is deleted while historical task and operation records remain.
+- Access tokens remain in the operating-system credential store and are never written to the preferences table.
