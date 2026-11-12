@@ -82,7 +82,7 @@ class GitNestApp:
             ft.DropdownOption("6","6 线程"),ft.DropdownOption("8","8 线程")])
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
-        self.gallery=ft.GridView(expand=False, height=320, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12, visible=False)
+        self.gallery=ft.GridView(expand=False, height=0, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12, visible=False)
         self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
@@ -891,6 +891,10 @@ class GitNestApp:
         else:
             image_items.sort(key=lambda x:x.name.casefold())
         self.gallery.controls=[]
+        # A hidden GridView can still leave a native viewport placeholder on some
+        # Flet desktop builds. Collapse its height completely when there are no
+        # matching images; restore the gallery height only when cards are present.
+        self.gallery.height=320 if image_items else 0
         self.gallery.visible=bool(image_items)
         self.remote_empty.visible=not bool(image_items)
         if self.remote_items:
