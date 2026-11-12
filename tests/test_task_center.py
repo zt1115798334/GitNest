@@ -4,9 +4,17 @@ from gitnest import database
 from gitnest.services import UploadControl
 
 
+def seed_repository():
+    return database.save_repository({
+        "name": "Test repository", "platform": "github", "owner": "owner",
+        "repo": "repo", "branch": "main", "base_path": "images",
+    })
+
+
 def test_upload_task_payload_persists_and_can_be_retrieved(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "gitnest.sqlite3")
     database.initialize()
+    repository = seed_repository()
 
     payload = {
         "paths": ["C:/photos/a.png", "C:/photos/b.png"],
@@ -16,7 +24,7 @@ def test_upload_task_payload_persists_and_can_be_retrieved(tmp_path, monkeypatch
             "C:/photos/a.png": {"state": "uploaded", "message": "已上传"}
         },
     }
-    task_id = database.create_upload_task(1, payload)
+    task_id = database.create_upload_task(repository["id"], payload)
     database.update_upload_task(
         task_id,
         payload={**payload, "completed": {
@@ -40,7 +48,8 @@ def test_upload_task_payload_persists_and_can_be_retrieved(tmp_path, monkeypatch
 def test_initialize_recovers_interrupted_running_tasks_as_paused(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "gitnest.sqlite3")
     database.initialize()
-    task_id = database.create_upload_task(1, {"paths": ["photo.png"]})
+    repository = seed_repository()
+    task_id = database.create_upload_task(repository["id"], {"paths": ["photo.png"]})
     database.update_upload_task(task_id, status="running", summary="正在上传")
 
     # A second initialization represents the next application startup.
