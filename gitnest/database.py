@@ -4,8 +4,10 @@ from gitnest.config import DB_PATH
 
 @contextmanager
 def connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
         conn.commit()
@@ -14,6 +16,7 @@ def connection():
 
 def initialize() -> None:
     with connection() as db:
+        db.execute("PRAGMA journal_mode=WAL")
         db.execute("""CREATE TABLE IF NOT EXISTS repositories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL, platform TEXT NOT NULL CHECK(platform IN ('github','gitee')),
@@ -34,6 +37,8 @@ def initialize() -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL)""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_upload_tasks_status_updated ON upload_tasks(status, updated_at DESC)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(id DESC)")
         db.execute("UPDATE upload_tasks SET status='paused', summary='程序上次未正常结束，可继续或取消' WHERE status='running'")
 
 def repositories() -> list[dict]:
@@ -101,4 +106,14 @@ def upload_task_rows(limit: int = 100) -> list[dict]:
     return result
 
 def get_upload_task(task_id: int) -> dict | None:
-    return next((row for row in upload_task_rows(500) if row["id"]==task_id),None)
+    import json
+    with connection() as db:
+        row = db.execute("SELECT * FROM upload_tasks WHERE id=?", (task_id,)).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    try:
+        item["payload"] = json.loads(item.pop("payload_json"))
+    except (ValueError, TypeError):
+        item["payload"] = {}
+    return item
