@@ -1,9 +1,17 @@
 from pathlib import Path
 
 import pytest
+from io import BytesIO
+from PIL import Image
 
 from gitnest.providers.base import ProviderError
 from gitnest import services
+
+
+def png_bytes():
+    stream = BytesIO()
+    Image.new("RGB", (12, 8), "blue").save(stream, format="PNG")
+    return stream.getvalue()
 
 
 class FakeProvider:
@@ -31,7 +39,7 @@ def test_upload_paths_uses_remote_subfolder_and_preserves_relative_paths(tmp_pat
     nested = root / "2026"
     nested.mkdir(parents=True)
     image = nested / "trip.png"
-    image.write_bytes(b"png-bytes")
+    image.write_bytes(png_bytes())
     provider = FakeProvider()
     progress = []
     monkeypatch.setattr(services, "with_provider", lambda *_: provider)
@@ -52,7 +60,7 @@ def test_upload_paths_uses_remote_subfolder_and_preserves_relative_paths(tmp_pat
 
 def test_upload_paths_skips_existing_file_by_default(tmp_path, monkeypatch):
     image = tmp_path / "same.jpg"
-    image.write_bytes(b"image")
+    image.write_bytes(png_bytes())
     provider = FakeProvider({"assets/same.jpg": b"old"})
     monkeypatch.setattr(services, "with_provider", lambda *_: provider)
 
@@ -80,7 +88,7 @@ def test_upload_paths_overwrite_passes_remote_sha(tmp_path, monkeypatch):
 
 def test_upload_paths_rejects_unsafe_remote_subfolder(tmp_path, monkeypatch):
     image = tmp_path / "safe.png"
-    image.write_bytes(b"image")
+    image.write_bytes(png_bytes())
     monkeypatch.setattr(
         services, "with_provider",
         lambda *_: pytest.fail("provider must not be created for an unsafe path"),
@@ -136,3 +144,26 @@ def test_upload_paths_runs_multiple_workers_and_preserves_result_order(tmp_path,
     assert all(row[1] == "uploaded" for row in results)
     assert peak >= 2
     assert len(writes) == 4
+
+
+def test_upload_paths_rejects_source_changed_after_selection(tmp_path, monkeypatch):
+    image = tmp_path / "changed.png"
+    image.write_bytes(png_bytes())
+    stat = image.stat()
+    expected = {str(image.resolve()): {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}}
+    image.write_bytes(png_bytes() + b"changed")
+    provider_created = []
+
+    def factory(*args):
+        provider_created.append(True)
+        return FakeProvider()
+
+    monkeypatch.setattr(services, "with_provider", factory)
+    result = services.upload_paths(
+        {"base_path": "images"}, "token", [image],
+        expected_files=expected,
+    )
+
+    assert result[0][1] == "failed"
+    assert "已发生变化" in result[0][2]
+    assert not provider_created
