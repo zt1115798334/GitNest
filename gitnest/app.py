@@ -742,12 +742,14 @@ class GitNestApp:
         if not hasattr(self,"saved_tasks"):return
         self.saved_tasks.controls=[]
         rows=upload_task_rows(30)
+        state_labels={"queued":"等待执行","running":"正在执行","paused":"已暂停","completed":"已完成","failed":"失败","cancelled":"已取消"}
         for task in rows:
             state=task["status"]
+            state_label=state_labels.get(state,state)
             can_resume=state in {"paused","failed","queued"}
             self.saved_tasks.controls.append(ft.Container(padding=8,border=ft.Border.all(1,ft.Colors.OUTLINE_VARIANT),
                 border_radius=8,content=ft.Row([
-                    ft.Column([ft.Text(f"任务 #{task['id']} · {state}",weight=ft.FontWeight.BOLD),
+                    ft.Column([ft.Text(f"任务 #{task['id']} · {state_label}",weight=ft.FontWeight.BOLD),
                                ft.Text(task["summary"],size=11,color=ft.Colors.GREY_600),
                                ft.Text(task["created_at"],size=10,color=ft.Colors.GREY_500)],expand=True),
                     ft.OutlinedButton("继续 / 重试",disabled=not can_resume or self.active_upload_control is not None,
@@ -834,6 +836,8 @@ class GitNestApp:
             items=await self.run_background(remote_images,repo,self.token_for(repo))
             if items is None:return
             self.remote_items=items
+            self.remote_empty.visible=not bool(items)
+            self.remote_empty.value="该仓库目录中没有图片。" if not items else "正在生成远程图片预览……"
             self.remote_cache={}
             self.gallery.controls=[]
             self.gallery.visible=False
