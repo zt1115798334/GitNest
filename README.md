@@ -103,3 +103,12 @@ Each platform test is skipped when its required environment variables are absent
 python -m pytest
 python -m compileall -q .
 \`\`\`
+
+
+## Task and performance improvements
+
+- Upload scheduling keeps only the configured number of worker futures in flight, avoiding an unbounded executor queue for very large folders.
+- Batch downloads use bounded parallel workers (1–8, default 4) and preserve the original file order in the result summary.
+- SQLite uses WAL mode, a busy timeout, foreign-key enforcement, and indexes for task/history queries.
+- Looking up a task by ID now uses a direct query instead of loading and decoding the latest 500 task payloads.
+- Upload and download worker counts are independently configurable. Increase concurrency gradually; provider API rate limits and local network bandwidth still apply.
