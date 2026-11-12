@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+import os
+import tempfile
 from threading import Event, Lock
 from time import sleep
 from gitnest.providers import create_provider
@@ -60,28 +62,63 @@ def remote_images(repository: dict, token: str):
         provider.close()
 
 
-def download_one(repository: dict, token: str, remote_path: str, target_root: str):
+def _download_destination(target_root: str, relative_path: str, conflict: str) -> Path | None:
+    if conflict not in {"skip", "rename", "overwrite"}:
+        raise ValueError("未知的下载冲突策略")
+    destination = safe_local_destination(target_root, relative_path)
+    if not destination.exists():
+        return destination
+    if conflict == "skip":
+        return None
+    if conflict == "overwrite":
+        return destination
+    stem, suffix = destination.stem, destination.suffix
+    for index in range(1, 100000):
+        candidate = destination.with_name(f"{stem}_{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"无法为同名文件生成新名称：{destination.name}")
+
+
+def download_one(repository: dict, token: str, remote_path: str, target_root: str, conflict: str = "skip"):
+    root = repository["base_path"].strip("/")
+    rel = remote_path[len(root) + 1:] if root and remote_path.startswith(root + "/") else remote_path
+    destination = _download_destination(target_root, rel, conflict)
+    if destination is None:
+        return None
     provider = with_provider(repository, token)
+    temporary_path = None
     try:
-        root = repository["base_path"].strip("/")
-        rel = remote_path[len(root) + 1:] if root and remote_path.startswith(root + "/") else remote_path
-        destination = safe_local_destination(target_root, rel)
         content, _ = provider.get_file(remote_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(content)
+        # Write beside the destination and atomically replace it, so a failed
+        # transfer never leaves a truncated file under the final filename.
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=f".{destination.name}.", suffix=".part",
+            dir=destination.parent, delete=False
+        ) as temporary:
+            temporary.write(content)
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, destination)
+        temporary_path = None
         return destination
     finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
         provider.close()
 
 
-def download_all(repository: dict, token: str, target_root: str, remote_items: list):
+def download_all(repository: dict, token: str, target_root: str, remote_items: list, conflict: str = "skip"):
     results = []
     for item in remote_items:
         try:
-            path = download_one(repository, token, item.path, target_root)
-            results.append((item.path, True, str(path)))
+            path = download_one(repository, token, item.path, target_root, conflict)
+            if path is None:
+                results.append((item.path, "skipped", "本地同名文件已存在，按策略跳过"))
+            else:
+                results.append((item.path, "downloaded", str(path)))
         except Exception as exc:
-            results.append((item.path, False, str(exc)))
+            results.append((item.path, "failed", str(exc)))
     return results
 
 
@@ -96,6 +133,7 @@ def upload_paths(
     progress_callback=None,
     control: UploadControl | None = None,
     max_workers: int = 3,
+    expected_files: dict | None = None,
 ):
     """Upload files concurrently with one isolated provider/client per worker.
 
@@ -150,7 +188,14 @@ def upload_paths(
             if not file_path.is_file():
                 raise ValueError("文件不存在或不是普通文件")
             relative = file_path.relative_to(root).as_posix() if root else file_path.name
+            expected = (expected_files or {}).get(str(file_path))
+            before = file_path.stat()
+            if expected and (before.st_size != expected.get("size") or before.st_mtime_ns != expected.get("mtime_ns")):
+                raise ValueError("文件自加入上传队列后已发生变化，请重新选择文件再上传")
             content = file_path.read_bytes()
+            after = file_path.stat()
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError("上传期间本地文件发生变化，请重新选择文件再上传")
             validate_image(content, relative)
             remote_path = safe_remote_path(f"{remote_root}/{relative}" if remote_root else relative)
             provider = with_provider(repository, token)
