@@ -573,11 +573,13 @@ class GitNestApp:
                         processed=sum(1 for value in completed.values()
                                       if value.get("state") in {"uploaded","skipped","failed"})
                         should_checkpoint=persisted_checkpoint_count % 5 == 0
+                        checkpoint_payload=({**payload,"completed":dict(completed)}
+                                            if should_checkpoint else None)
                     summary=f"已处理 {processed} 项"
-                    # Persist the large payload every five terminal file events;
-                    # the final task update always writes the complete payload.
-                    if should_checkpoint:
-                        update_upload_task(task_id,payload=payload,summary=summary)
+                    # Snapshot under the progress lock so concurrent workers cannot
+                    # mutate the completed map while JSON serialization is running.
+                    if checkpoint_payload is not None:
+                        update_upload_task(task_id,payload=checkpoint_payload,summary=summary)
                     else:
                         update_upload_task(task_id,summary=summary)
                 loop.call_soon_threadsafe(self.update_upload_progress,overall_index,len(paths),str(matched),state,message)
