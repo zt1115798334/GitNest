@@ -176,13 +176,14 @@ class GitNestApp:
         self.preview_text=ft.Text(selectable=True)
         self.sync_rows=[]
         self.sync_selected=set()
-        self.sync_result_list=ft.Column(spacing=6)
+        self.sync_result_list=ft.Column(spacing=6,scroll=ft.ScrollMode.AUTO)
         self.sync_upload_button=ft.Button("上传选中项",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.sync_upload_selected,disabled=True)
         self.sync_download_button=ft.OutlinedButton("下载选中项",icon=ft.Icons.DOWNLOAD,on_click=self.sync_download_selected,disabled=True)
         self.sync_selection_summary=ft.Text("尚未选择同步项目",size=12,color=ft.Colors.GREY_600)
         self.status=ft.Text("选择仓库和本地图片，即可开始管理",color=ft.Colors.GREY_600)
         self.upload_button=ft.Button("上传所选图片",icon=ft.Icons.CLOUD_UPLOAD,on_click=self.upload_selected,disabled=True)
         self.folder_upload_button=ft.OutlinedButton("上传整个目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.upload_local,disabled=True)
+
         self.local_section=ft.Container(
             padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
             content=ft.Column(spacing=12,controls=[
@@ -194,16 +195,22 @@ class GitNestApp:
                     ft.Button("选择图片",icon=ft.Icons.ADD_PHOTO_ALTERNATE,on_click=self.pick_files),
                     ft.OutlinedButton("选择目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_folder),
                     ft.TextButton("清空选择",icon=ft.Icons.CLEAR,on_click=self.clear_local_selection),
-                    self.upload_button,
-                    self.folder_upload_button,
-                    self.upload_progress
+                    self.upload_button,self.folder_upload_button,self.upload_progress
                 ],wrap=True),
-                self.local_folder,
-                self.local_empty,
-                self.local_gallery,
-                self.local_load_more,
+                self.local_folder,self.local_empty,self.local_gallery,self.local_load_more
             ])
         )
+
+        self.upload_settings_panel=ft.Container(
+            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+            content=ft.Column(spacing=12,controls=[
+                ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                ft.Text("设置远程目录、文件冲突规则、提交说明和上传并发。",size=12,color="#7A8495"),
+                ft.Row([self.remote_subpath,self.conflict,self.commit_message,self.upload_workers],wrap=True,spacing=10),
+                self.confirm_overwrite,self.status
+            ])
+        )
+
         self.remote_section=ft.Container(
             padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
             content=ft.Column(spacing=10,controls=[
@@ -214,51 +221,74 @@ class GitNestApp:
                     ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)],wrap=True),
                 ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict,self.download_workers],wrap=True),
                 self.confirm_download_overwrite,
-                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10)
+                ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
+                self.remote_gallery_host
             ])
         )
-        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=16,controls=[
-            ft.Row([
-                ft.Column([
-                    ft.Text("图片工作台",size=30,weight=ft.FontWeight.BOLD,color="#202B3C"),
-                    ft.Text("管理本地图片与 GitHub / Gitee 仓库之间的上传、下载和同步。",size=12,color="#7A8495")
-                ],expand=True,spacing=5),
-                self.repo_dropdown,
-                ft.IconButton(ft.Icons.REFRESH,tooltip="刷新仓库列表",on_click=self.refresh_repositories)
-            ],vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            self.local_section,
-            ft.Container(padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
-                content=ft.Column(spacing=12,controls=[
-                    ft.Row([ft.Column([ft.Text("上传设置",size=18,weight=ft.FontWeight.BOLD,color="#202B3C"),
-                        ft.Text("设置远程目录、文件冲突规则和提交说明",size=11,color="#8993A5")],spacing=3),
-                        ft.Container(expand=True),ft.Icon(ft.Icons.TUNE_ROUNDED,color="#8B95A6")]),
-                    ft.Row([self.remote_subpath,self.conflict,self.commit_message,self.upload_workers],wrap=True,spacing=10),
-                    self.confirm_overwrite,
-                    self.status,
-                    self.queue_panel,
-                    ft.Row([self.pause_upload_button,self.resume_upload_button,self.cancel_upload_button],wrap=True),
-                    self.retry_failed_button,
-                    self.upload_details,
-                    ft.Divider(color="#EDF0F5"),
-                    ft.Row([ft.Text("任务中心",size=14,weight=ft.FontWeight.BOLD,color="#344054"),
-                        ft.Container(expand=True),
-                        ft.Text("可暂停、恢复和重试",size=10,color="#8993A5")]),
-                    ft.Container(padding=12,border_radius=12,bgcolor="#F8FAFC",content=self.saved_tasks)
-                ])),
-            self.remote_section,
-            ft.Container(padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
-                content=ft.Column(spacing=10,controls=[
-                    ft.Text("同步差异",size=18,weight=ft.FontWeight.BOLD),
-                    ft.Text("按文件内容 SHA-256 比较本地和远程图片，不会自动删除任何文件。",size=12,color=ft.Colors.GREY_600),
-                    ft.Row([
-                        ft.OutlinedButton("比较本地与远程内容",icon=ft.Icons.COMPARE_ARROWS,on_click=self.sync_preview),
-                        self.sync_upload_button,self.sync_download_button,
-                    ],wrap=True),
-                    self.sync_selection_summary,
-                    self.sync_result_list,
-                    self.preview_text
-                ]))
+
+        self.sync_panel=ft.Container(
+            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+            content=ft.Column(spacing=10,controls=[
+                ft.Text("同步差异",size=18,weight=ft.FontWeight.BOLD),
+                ft.Text("按文件内容 SHA-256 比较本地和远程图片，不会自动删除任何文件。",size=12,color=ft.Colors.GREY_600),
+                ft.Row([ft.OutlinedButton("比较本地与远程内容",icon=ft.Icons.COMPARE_ARROWS,on_click=self.sync_preview),
+                    self.sync_upload_button,self.sync_download_button],wrap=True),
+                self.sync_selection_summary,
+                ft.Container(height=430,content=self.sync_result_list,border=ft.Border.all(1,"#EEF1F5"),border_radius=10,padding=8),
+                self.preview_text
+            ])
+        )
+
+        self.task_panel=ft.Container(
+            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+            content=ft.Column(spacing=12,controls=[
+                ft.Row([ft.Text("任务中心",size=20,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                    ft.Container(expand=True),ft.Text("独立查看任务状态与处理进度",size=11,color="#8993A5")]),
+                self.queue_panel,
+                ft.Row([self.pause_upload_button,self.resume_upload_button,self.cancel_upload_button],wrap=True),
+                self.retry_failed_button,self.upload_details,
+                ft.Divider(color="#EDF0F5"),
+                ft.Text("历史上传任务",size=14,weight=ft.FontWeight.BOLD,color="#344054"),
+                ft.Container(height=520,content=self.saved_tasks,bgcolor="#F8FAFC",padding=12,border_radius=12)
+            ])
+        )
+
+        self.workspace_title=ft.Row([
+            ft.Column([ft.Text("图片工作台",size=28,weight=ft.FontWeight.BOLD,color="#202B3C"),
+                ft.Text("将本地图片、任务、远程图片和同步差异分区管理。",size=12,color="#7A8495")],expand=True,spacing=4),
+            self.repo_dropdown,ft.IconButton(ft.Icons.REFRESH,tooltip="刷新仓库列表",on_click=self.refresh_repositories)
+        ],vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+        self.workspace_nav=ft.Row(spacing=8,scroll=ft.ScrollMode.AUTO,controls=[
+            ft.OutlinedButton("本地上传",icon=ft.Icons.ADD_PHOTO_ALTERNATE,on_click=lambda e:self.show_workspace_section("local")),
+            ft.OutlinedButton("任务中心",icon=ft.Icons.TASK_ALT,on_click=lambda e:self.show_workspace_section("tasks")),
+            ft.OutlinedButton("远程图片库",icon=ft.Icons.CLOUD_OUTLINED,on_click=lambda e:self.show_workspace_section("remote")),
+            ft.OutlinedButton("同步差异",icon=ft.Icons.COMPARE_ARROWS,on_click=lambda e:self.show_workspace_section("sync"))
         ])
+        self.workspace_content=ft.Container(expand=True,content=self._workspace_scroll([
+            self.local_section,self.upload_settings_panel
+        ]))
+        self._workspace_sections={
+            "local":[self.local_section,self.upload_settings_panel],
+            "tasks":[self.task_panel],
+            "remote":[self.remote_section],
+            "sync":[self.sync_panel]
+        }
+        self._workspace_active="local"
+        return ft.Column(expand=True,spacing=12,controls=[
+            self.workspace_title,self.workspace_nav,self.workspace_content
+        ])
+
+    def _workspace_scroll(self, controls):
+        """Every workspace section owns the available height and its own scroll area."""
+        return ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=14,controls=controls)
+
+    def show_workspace_section(self, section):
+        if section not in self._workspace_sections:
+            return
+        self._workspace_active=section
+        self.workspace_content.content=self._workspace_scroll(self._workspace_sections[section])
+        self.page.update()
 
     def _detach_remote_gallery(self):
         """Keep the remote preview host out of the layout until explicitly requested."""
