@@ -39,6 +39,7 @@ def initialize() -> None:
             FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL)""")
         db.execute("CREATE INDEX IF NOT EXISTS idx_upload_tasks_status_updated ON upload_tasks(status, updated_at DESC)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(id DESC)")
+        db.execute("""CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
         db.execute("UPDATE upload_tasks SET status='paused', summary='程序上次未正常结束，可继续或取消' WHERE status='running'")
 
 def repositories() -> list[dict]:
@@ -117,3 +118,19 @@ def get_upload_task(task_id: int) -> dict | None:
     except (ValueError, TypeError):
         item["payload"] = {}
     return item
+
+
+
+def get_settings() -> dict:
+    with connection() as db:
+        rows = db.execute("SELECT key, value FROM app_settings").fetchall()
+    return {row["key"]: row["value"] for row in rows}
+
+
+def set_setting(key: str, value: str) -> None:
+    with connection() as db:
+        db.execute(
+            "INSERT INTO app_settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, str(value)),
+        )
