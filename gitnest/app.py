@@ -88,7 +88,8 @@ class GitNestApp:
         self.remote_empty=ft.Text('尚未读取远程图片。点击“读取远程图片”开始浏览。',size=12,color=ft.Colors.GREY_500)
         # Mount exactly one remote-gallery state at a time. An unmounted GridView
         # cannot leave behind an empty native scroll viewport on Flet desktop.
-        self.remote_gallery_host=ft.Container(content=self.remote_empty)
+        self.remote_gallery_host=ft.Container(content=self.remote_empty,visible=False)
+        self.remote_gallery_loaded=False
         self.repo_form=self.build_repo_page()
         self.workspace=self.build_workspace()
         self.history=self.build_history()
@@ -363,6 +364,8 @@ class GitNestApp:
         self.remote_items=[]
         self.remote_cache={}
         self.gallery.controls.clear()
+        self.remote_gallery_loaded=False
+        self.remote_gallery_host.visible=False
         self.remote_gallery_host.content=self.remote_empty
         self.remote_empty.value="尚未读取远程图片。点击“读取远程图片”开始浏览。"
         self.remote_count.value=""
@@ -704,7 +707,7 @@ class GitNestApp:
             self.confirm_overwrite.value=False
             self.upload_progress.value=1 if status=="completed" else 0
             if any(value.get("state")=="uploaded" for value in completed.values()):
-                self.remote_items=[];self.remote_cache={};self.gallery.controls.clear();self.remote_gallery_host.content=self.remote_empty
+                self.remote_items=[];self.remote_cache={};self.gallery.controls.clear();self.remote_gallery_loaded=False;self.remote_gallery_host.visible=False;self.remote_gallery_host.content=self.remote_empty
         except Exception as ex:
             update_upload_task(task_id,payload=payload,status="failed",summary=f"任务异常：{ex}")
             self.status.value=f"任务 #{task_id} 执行失败：{ex}"
@@ -849,6 +852,8 @@ class GitNestApp:
             items=await self.run_background(remote_images,repo,self.token_for(repo))
             if items is None:return
             self.remote_items=items
+            self.remote_gallery_loaded=True
+            self.remote_gallery_host.visible=True
             self.remote_empty.value="该仓库目录中没有图片。" if not items else "正在生成远程图片预览……"
             self.remote_gallery_host.content=self.remote_empty
             self.remote_cache={}
@@ -897,6 +902,7 @@ class GitNestApp:
             self.remote_empty.value="没有匹配的图片，请调整搜索关键词或格式筛选。"
         # Do not keep an empty GridView in the control tree: some Flet desktop
         # renderers paint its native viewport as a large gray rectangle.
+        self.remote_gallery_host.visible=self.remote_gallery_loaded
         self.remote_gallery_host.content=self.gallery if image_items else self.remote_empty
         self.remote_count.value=f"显示 {len(image_items)} / 共 {len(self.remote_items)} 张"
         for item in image_items:
