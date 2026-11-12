@@ -54,14 +54,14 @@ def test_upload_paths_uses_remote_subfolder_and_preserves_relative_paths(tmp_pat
     assert progress[0][3] == "uploading"
     assert progress[-1] == (1, 1, "2026/trip.png", "uploaded", "已提交到 images/summer/2026/trip.png")
     assert provider.writes[0][0] == "images/summer/2026/trip.png"
-    assert provider.writes[0][1] == b"png-bytes"
+    assert provider.writes[0][1] == png_bytes()
     assert provider.closed
 
 
 def test_upload_paths_skips_existing_file_by_default(tmp_path, monkeypatch):
-    image = tmp_path / "same.jpg"
+    image = tmp_path / "same.png"
     image.write_bytes(png_bytes())
-    provider = FakeProvider({"assets/same.jpg": b"old"})
+    provider = FakeProvider({"assets/same.png": b"old"})
     monkeypatch.setattr(services, "with_provider", lambda *_: provider)
 
     result = services.upload_paths(
@@ -73,9 +73,9 @@ def test_upload_paths_skips_existing_file_by_default(tmp_path, monkeypatch):
 
 
 def test_upload_paths_overwrite_passes_remote_sha(tmp_path, monkeypatch):
-    image = tmp_path / "same.jpg"
-    image.write_bytes(b"new")
-    provider = FakeProvider({"assets/same.jpg": b"old"})
+    image = tmp_path / "same.png"
+    image.write_bytes(png_bytes())
+    provider = FakeProvider({"assets/same.png": b"old"})
     monkeypatch.setattr(services, "with_provider", lambda *_: provider)
 
     result = services.upload_paths(
@@ -131,16 +131,16 @@ def test_upload_paths_runs_multiple_workers_and_preserves_result_order(tmp_path,
 
     monkeypatch.setattr(services, "with_provider", lambda *_: ConcurrentFakeProvider())
     files = []
-    for name in ("a.jpg", "b.jpg", "c.jpg", "d.jpg"):
+    for name in ("a.png", "b.png", "c.png", "d.png"):
         path = tmp_path / name
-        path.write_bytes(b"image")
+        path.write_bytes(png_bytes())
         files.append(path)
 
     results = services.upload_paths(
         {"base_path": "images"}, "token", files, max_workers=3
     )
 
-    assert [Path(row[0]).name for row in results] == ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+    assert [Path(row[0]).name for row in results] == ["a.png", "b.png", "c.png", "d.png"]
     assert all(row[1] == "uploaded" for row in results)
     assert peak >= 2
     assert len(writes) == 4
