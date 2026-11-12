@@ -70,7 +70,7 @@ class GitNestApp:
         self.local_empty=ft.Text('选择图片或目录后，这里会显示图片预览。',size=12,color=ft.Colors.GREY_500)
         self.local_gallery=ft.GridView(expand=False, height=260, runs_count=4, max_extent=190, child_aspect_ratio=0.9, spacing=10, run_spacing=10, visible=False)
         self.local_load_more=ft.TextButton("加载更多",on_click=self.load_more_local_previews,visible=False)
-        self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True,on_change=self.save_preferences)
+        self.local_folder=ft.TextField(label="上传 / 同步本地目录", expand=True)
         self.download_folder=ft.TextField(label="远程图片下载到本地目录",expand=True,read_only=True)
         self.download_conflict=ft.Dropdown(label="下载同名文件",width=180,value="skip",options=[
             ft.DropdownOption("skip","跳过本地文件"),ft.DropdownOption("rename","自动重命名"),
@@ -160,7 +160,7 @@ class GitNestApp:
     def build_workspace(self):
         self.conflict=ft.Dropdown(label="同名文件处理",value="skip",width=220,on_select=self.on_conflict_change,options=[
             ft.DropdownOption("skip","跳过已存在文件"),ft.DropdownOption("overwrite","覆盖远程文件"),
-            ft.DropdownOption("rename","自动重命名")],on_select=self.save_preferences)
+            ft.DropdownOption("rename","自动重命名")])
         self.commit_message=ft.TextField(label="提交说明",value="GitNest image upload",width=280,on_change=self.save_preferences)
         self.upload_workers=ft.Dropdown(label="上传并发",value="3",width=130,on_select=self.save_preferences,options=[
             ft.DropdownOption("1","1 线程"),ft.DropdownOption("2","2 线程"),
@@ -312,7 +312,6 @@ class GitNestApp:
                 ("upload_workers",self.upload_workers),
                 ("commit_message",self.commit_message),
                 ("remote_subpath",self.remote_subpath),
-                ("local_folder",self.local_folder),
             )
             for key,control in controls:
                 if key in values:
