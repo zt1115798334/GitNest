@@ -1,5 +1,9 @@
 from pathlib import Path, PurePosixPath
+from io import BytesIO
 import hashlib
+import warnings
+
+from PIL import Image, UnidentifiedImageError
 from gitnest.config import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES
 
 class ImageFileError(ValueError):
@@ -34,9 +38,31 @@ def safe_local_destination(root: str | Path, relative_path: str) -> Path:
     return destination
 
 def validate_image(content: bytes, path: str) -> None:
+    """Validate both the filename extension and the actual encoded image."""
     if not is_image_path(path):
         raise ImageFileError("文件扩展名不是支持的图片格式")
     if not content:
         raise ImageFileError("图片文件为空")
     if len(content) > MAX_IMAGE_BYTES:
         raise ImageFileError(f"图片超过当前版本限制（{MAX_IMAGE_BYTES // 1024 // 1024} MB）")
+
+    expected_formats = {
+        ".jpg": {"JPEG"}, ".jpeg": {"JPEG"}, ".png": {"PNG"},
+        ".gif": {"GIF"}, ".webp": {"WEBP"}, ".bmp": {"BMP"},
+        ".tif": {"TIFF"}, ".tiff": {"TIFF"}, ".avif": {"AVIF"},
+    }
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as image:
+                actual_format = (image.format or "").upper()
+                if actual_format not in expected_formats[Path(path).suffix.lower()]:
+                    raise ImageFileError(
+                        f"图片内容格式为 {actual_format or '未知'}，与文件扩展名 {Path(path).suffix} 不匹配"
+                    )
+                image.verify()
+    except ImageFileError:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning) as exc:
+        raise ImageFileError(f"图片文件损坏或格式无法识别：{Path(path).name}（{exc}）") from exc
