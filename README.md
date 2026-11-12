@@ -36,7 +36,7 @@ If PowerShell blocks activation, run \`.venv\Scripts\activate.bat\` from CMD ins
 - Persistent upload tasks stored in SQLite, with cooperative pause/resume/cancel controls, per-file progress, retry of failed items, and recovery of interrupted tasks after restart.
 - Batch uploads with create/update detection, per-file progress, success/skip/failure summaries, custom remote subfolders, and commit messages.
 - Batch downloads that preserve paths relative to the configured remote image directory.
-- Two-way comparison by actual file-content SHA-256. Same-path files report both hashes and byte sizes; local-only, remote-only, identical, different and read-error states are distinguished.
+- Two-way comparison by actual file-content SHA-256. Same-path files report both hashes and byte sizes; local-only, remote-only, identical, different and read-error states are distinguished. Only-local and only-remote rows can be selected for batch upload/download; identical rows are informational, while different-content and read-error rows are deliberately excluded from one-click sync.
 - SQLite operation history and safe error reporting.
 - Overwrite mode requires an explicit confirmation checkbox before upload starts.
 - Upload subfolders are validated as safe repository-relative paths; selected files cannot escape the configured image root.
@@ -66,7 +66,7 @@ GitHub fine-grained PAT: grant access to this repository and \`Contents: Read an
 - Existing local download targets are skipped by default. Local overwrite requires selecting the overwrite policy and checking the explicit confirmation box.
 - Downloads are written to a temporary file in the destination directory and atomically moved into place, avoiding truncated final files after interrupted transfers.
 - Uploads reject corrupt images and extension/content mismatches. If a selected source file changes before or during upload, that file is rejected and must be selected again.
-- Sync preview is non-destructive. GitNest does not delete remote files.
+- Sync preview is non-destructive. Select local-only items to upload and remote-only items to download; same-content items need no action. Different-content and comparison-error items are not automatically synchronized, preventing accidental overwrite. GitNest does not delete remote files.
 - Path traversal is rejected; downloaded files must remain inside the selected local directory.
 - API tokens are held in memory only while a request is being made and persisted via the OS credential manager.
 - Do not use an account password. Use access tokens.
