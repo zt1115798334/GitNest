@@ -25,6 +25,10 @@ If PowerShell blocks activation, run \`.venv\Scripts\activate.bat\` from CMD ins
 - Multiple GitHub and Gitee repositories and branches.
 - PAT / Gitee private-token authentication. Tokens are stored in the OS credential vault through \`keyring\`; they are never written to SQLite or logs.
 - Recursive remote image listing, local image folder scanning, image previews and direct download.
+- Local preview pagination with an explicit “Load more” control after the first 100 images.
+- Separate upload/sync source and remote-download destination directories to prevent accidental mixing.
+- Download conflict policies: skip existing files by default, auto-rename, or overwrite only after explicit confirmation; downloads are written to a temporary file and atomically moved into place.
+- Upload validation checks the actual encoded image format and file integrity, not only the filename extension; source file size and modification time are checked against the selection snapshot before upload.
 - Remote thumbnail gallery: originals and JPEG thumbnails are cached locally; cache keys use the full repository path to avoid collisions between same-named files.
 - A redesigned image workspace with multi-select local image picking, recursive folder scanning, local thumbnail previews, per-file removal, and clear upload settings.
 - Per-file upload task queue with queued / uploading / uploaded / skipped / failed states, progress reporting, and retry for failed local files.
@@ -59,6 +63,9 @@ GitHub fine-grained PAT: grant access to this repository and \`Contents: Read an
 ## Safety
 
 - Existing remote files are never overwritten silently. Choose an explicit conflict policy before uploading.
+- Existing local download targets are skipped by default. Local overwrite requires selecting the overwrite policy and checking the explicit confirmation box.
+- Downloads are written to a temporary file in the destination directory and atomically moved into place, avoiding truncated final files after interrupted transfers.
+- Uploads reject corrupt images and extension/content mismatches. If a selected source file changes before or during upload, that file is rejected and must be selected again.
 - Sync preview is non-destructive. GitNest does not delete remote files.
 - Path traversal is rejected; downloaded files must remain inside the selected local directory.
 - API tokens are held in memory only while a request is being made and persisted via the OS credential manager.
