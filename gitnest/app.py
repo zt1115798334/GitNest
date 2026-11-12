@@ -212,8 +212,8 @@ class GitNestApp:
         )
 
         self.remote_section=ft.Container(
-            expand=True,padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
-            content=ft.Column(expand=True,scroll=ft.ScrollMode.AUTO,spacing=10,controls=[
+            padding=20,border_radius=16,bgcolor="#FFFFFF",border=ft.Border.all(1,"#E7EBF2"),
+            content=ft.Column(spacing=10,controls=[
                 ft.Row([ft.Column([
                     ft.Text("远程图片库",size=18,weight=ft.FontWeight.BOLD),
                     ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
@@ -288,13 +288,12 @@ class GitNestApp:
         if section not in self._workspace_sections:
             return
         self._workspace_active=section
-        # The remote page has fixed toolbars and its own gallery viewport. Do not
-        # wrap it in the generic outer scroll view (nested scroll views broke the
-        # Windows desktop layout and pushed the controls below a gray viewport).
-        if section == "remote":
-            self.workspace_content.content=self.remote_section
-        else:
-            self.workspace_content.content=self._workspace_scroll(self._workspace_sections[section])
+        # Use exactly one scroll viewport for every workspace section.
+        # The remote section used to own an inner scrollable Column while bypassing
+        # the workspace scroll container. On Windows this produced an oversized
+        # gray viewport and prevented normal page scrolling. Keep the section
+        # content non-scrollable and let the common workspace viewport own scrolling.
+        self.workspace_content.content=self._workspace_scroll(self._workspace_sections[section])
         self.page.update()
 
     def on_download_conflict_change(self,e):
