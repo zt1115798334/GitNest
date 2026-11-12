@@ -550,16 +550,36 @@ class GitNestApp:
         loop=asyncio.get_running_loop()
         control=self.active_upload_control
         progress_lock=Lock()
+        # Resolve progress events in O(1) rather than scanning the remaining
+        # file list for every callback (which becomes quadratic for large folders).
+        remaining_lookup={}
+        for item in remaining:
+            relative_path=(item.relative_to(self.local_root).as_posix()
+                           if self.local_root and item.is_relative_to(self.local_root) else item.name)
+            remaining_lookup[relative_path]=item
+            remaining_lookup[str(item)]=item
+        overall_indexes={str(item.resolve()): index+1 for index,item in enumerate(paths)}
+        persisted_checkpoint_count=0
+
         def progress_callback(index,total,path,state,message):
-            matched=next((item for item in remaining
-                if (item.relative_to(self.local_root).as_posix() if self.local_root and item.is_relative_to(self.local_root) else item.name)==path
-                or str(item)==path),None)
+            nonlocal persisted_checkpoint_count
+            matched=remaining_lookup.get(path)
             if matched is not None:
-                overall_index=paths.index(matched)+1
+                overall_index=overall_indexes.get(str(matched.resolve()),index)
                 if state in {"uploaded","skipped","failed","queued"}:
                     with progress_lock:
                         completed[str(matched.resolve())]={"state":state,"message":message}
-                        update_upload_task(task_id,payload=payload,summary=f"已处理 {sum(1 for v in completed.values() if v.get('state') in {'uploaded','skipped','failed'})} 项")
+                        persisted_checkpoint_count+=1
+                        processed=sum(1 for value in completed.values()
+                                      if value.get("state") in {"uploaded","skipped","failed"})
+                        should_checkpoint=persisted_checkpoint_count % 5 == 0
+                    summary=f"已处理 {processed} 项"
+                    # Persist the large payload every five terminal file events;
+                    # the final task update always writes the complete payload.
+                    if should_checkpoint:
+                        update_upload_task(task_id,payload=payload,summary=summary)
+                    else:
+                        update_upload_task(task_id,summary=summary)
                 loop.call_soon_threadsafe(self.update_upload_progress,overall_index,len(paths),str(matched),state,message)
             else:
                 loop.call_soon_threadsafe(self.update_upload_progress,index,len(paths),path,state,message)
