@@ -75,6 +75,10 @@ class GitNestApp:
             ft.DropdownOption("skip","跳过本地文件"),ft.DropdownOption("rename","自动重命名"),
             ft.DropdownOption("overwrite","覆盖本地文件")],on_select=self.on_download_conflict_change)
         self.confirm_download_overwrite=ft.Checkbox(label="我确认覆盖本地同名文件",value=False,visible=False)
+        self.download_workers=ft.Dropdown(label="下载并发",value="4",width=130,options=[
+            ft.DropdownOption("1","1 线程"),ft.DropdownOption("2","2 线程"),
+            ft.DropdownOption("3","3 线程"),ft.DropdownOption("4","4 线程"),
+            ft.DropdownOption("6","6 线程"),ft.DropdownOption("8","8 线程")])
         self.status=ft.Text()
         self.repo_dropdown=ft.Dropdown(label="当前仓库", width=420, on_select=self.on_repo_change)
         self.gallery=ft.GridView(expand=False, height=320, runs_count=4, max_extent=220, child_aspect_ratio=0.9, spacing=12, run_spacing=12, visible=False)
@@ -198,7 +202,7 @@ class GitNestApp:
                     ft.Text("浏览仓库中的图片，支持搜索、格式筛选、排序、预览和下载。",size=12,color=ft.Colors.GREY_600)
                 ],expand=True),ft.OutlinedButton("读取远程图片",icon=ft.Icons.REFRESH,on_click=self.load_remote),
                     ft.OutlinedButton("批量下载",icon=ft.Icons.DOWNLOAD,on_click=self.download_remote_all)],wrap=True),
-                ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict],wrap=True),
+                ft.Row([self.download_folder,ft.OutlinedButton("选择下载目录",icon=ft.Icons.FOLDER_OPEN,on_click=self.pick_download_folder),self.download_conflict,self.download_workers],wrap=True),
                 self.confirm_download_overwrite,
                 ft.Row([self.remote_search,self.remote_type,self.remote_sort,self.remote_count],wrap=True,spacing=10),
                 self.gallery
@@ -895,7 +899,8 @@ class GitNestApp:
                 raise ValueError("覆盖模式会替换本地同名文件，请先勾选覆盖确认")
             repo=self.current_repo()
             results=await self.run_background(download_all,repo,self.token_for(repo),
-                self.download_folder.value,self.remote_items,self.download_conflict.value)
+                self.download_folder.value,self.remote_items,self.download_conflict.value,
+                max_workers=int(self.download_workers.value or "4"))
             if results is None:return
             counts={"downloaded":0,"skipped":0,"failed":0}
             for path,state,msg in results:
@@ -1017,7 +1022,8 @@ class GitNestApp:
                 raise ValueError("远程文件列表已变化，请重新读取远程图片并比较")
             repo=self.current_repo()
             results=await self.run_background(download_all,repo,self.token_for(repo),
-                self.download_folder.value,items,self.download_conflict.value)
+                self.download_folder.value,items,self.download_conflict.value,
+                max_workers=int(self.download_workers.value or "4"))
             if results is None:
                 return
             counts={"downloaded":0,"skipped":0,"failed":0}
