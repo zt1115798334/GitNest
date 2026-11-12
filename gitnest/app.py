@@ -357,7 +357,19 @@ class GitNestApp:
         self.refresh_repo_cards()
 
     def on_repo_change(self,e):
-        self.remote_items=[]; self.gallery.controls.clear(); self.status.value="已切换仓库"; self.page.update()
+        self.remote_items=[]
+        self.remote_cache={}
+        self.gallery.controls.clear()
+        self.gallery.visible=False
+        self.remote_empty.value="尚未读取远程图片。点击“读取远程图片”开始浏览。"
+        self.remote_empty.visible=True
+        self.remote_count.value=""
+        self.sync_rows=[]
+        self.sync_selected=set()
+        self.sync_result_list.controls.clear()
+        self.preview_text.value=""
+        self.status.value="已切换仓库，请重新读取远程图片"
+        self.page.update()
 
     def form_data(self):
         owner=(self.owner.value or "").strip(); repo=(self.repo.value or "").strip()
@@ -882,8 +894,8 @@ class GitNestApp:
         self.gallery.controls=[]
         self.gallery.visible=bool(image_items)
         self.remote_empty.visible=not bool(image_items)
-        self.remote_empty.value=("尚未读取远程图片。点击“读取远程图片”开始浏览。" if not self.remote_items
-                                 else "没有匹配的图片，请调整搜索关键词或格式筛选。")
+        if self.remote_items:
+            self.remote_empty.value="没有匹配的图片，请调整搜索关键词或格式筛选。"
         self.remote_count.value=f"显示 {len(image_items)} / 共 {len(self.remote_items)} 张"
         for item in image_items:
             entry=self.remote_cache.get(item.path,{})
