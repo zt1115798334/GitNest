@@ -330,7 +330,6 @@ class GitNestApp:
             ("upload_workers",self.upload_workers),
             ("commit_message",self.commit_message),
             ("remote_subpath",self.remote_subpath),
-            ("local_folder",self.local_folder),
         )
         try:
             for key,control in controls:
