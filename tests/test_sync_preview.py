@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from io import BytesIO
+import struct
+import zlib
 from pathlib import Path
 
 from PIL import Image
@@ -12,6 +14,20 @@ def make_png(color):
     stream = BytesIO()
     Image.new("RGB", (8, 8), color).save(stream, format="PNG")
     return stream.getvalue()
+
+def make_same_length_png(rgb):
+    # An uncompressed DEFLATE stream keeps encoded lengths identical for
+    # different pixel values, making this regression test deterministic.
+    raw = b"".join(b"\x00" + bytes(rgb) * 8 for _ in range(8))
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(raw, level=0)) + chunk(b"IEND", b""))
+
 
 
 @dataclass
@@ -79,8 +95,8 @@ def test_compare_folders_classifies_local_remote_same_and_different(tmp_path, mo
 def test_compare_folders_does_not_treat_same_size_different_content_as_same(tmp_path, monkeypatch):
     root = tmp_path / "local"
     root.mkdir()
-    local = make_png("red")
-    remote = make_png("blue")
+    local = make_same_length_png((255, 0, 0))
+    remote = make_same_length_png((0, 0, 255))
     assert len(local) == len(remote)
     (root / "photo.png").write_bytes(local)
     provider = CompareProvider({"images/photo.png": remote})
